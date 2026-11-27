@@ -10,12 +10,14 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Folder,
   Globe,
   History,
   MoreHorizontal,
   Paperclip,
   RotateCcw,
   ShieldCheck,
+  Tag,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -502,9 +504,110 @@ export function EntryDetail({
         }}
         className="w-full flex flex-col gap-6"
       >
-        {/* Header — aberto e em largura total */}
-        <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-border/70">
-          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+        {/* Header — barra de contexto/ações + título limpo */}
+        <div className="flex flex-col gap-3.5 pb-5 border-b border-border/70">
+          <div className="flex items-center justify-between gap-3">
+            {entryModalOpen ? (
+              <div className="flex items-center gap-1.5 min-w-0 max-w-xs flex-1">
+                <Folder className="h-3.5 w-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
+                <Input
+                  placeholder={t.groupLabel}
+                  aria-label={t.groupLabel}
+                  value={groupPathDraft}
+                  onChange={(e) => setGroupPathDraft(e.target.value)}
+                  className="h-7 text-xs"
+                />
+              </div>
+            ) : (
+              <div
+                aria-label={t.groupLabel}
+                className="inline-flex items-center gap-1.5 rounded-md bg-bg-subtle px-2 py-1 text-xs text-fg-muted border border-border/60 min-w-0 max-w-full"
+              >
+                <Folder className="h-3 w-3 shrink-0 text-fg-subtle" aria-hidden="true" />
+                <span className="truncate">{groupPathDraft || 'Root'}</span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {entryModalOpen && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setEntryModalOpen(false)}
+                >
+                  {t.cancel}
+                </Button>
+              )}
+
+              <Button
+                type="submit"
+                size="sm"
+                variant="primary"
+                isDisabled={entryModalOpen ? !titleDraft.trim() : !isViewDirty}
+                isLoading={entryModalOpen ? creating : updateMutation.isPending}
+              >
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                {t.saveEntry}
+              </Button>
+
+              {!entryModalOpen && details && (
+                <Menu
+                  trigger={
+                    <Button size="sm" variant="secondary" isIconOnly aria-label="Entry actions">
+                      <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  }
+                >
+                  <MenuItem
+                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Ctrl+C"
+                    onAction={() => void handleCopy('password')}
+                  >
+                    {t.copyPassword}
+                  </MenuItem>
+                  <MenuItem
+                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Ctrl+B"
+                    onAction={() => void handleCopy('username')}
+                  >
+                    {t.copyUsername}
+                  </MenuItem>
+                  {details.hasOtp && (
+                    <MenuItem
+                      icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                      shortcut="Ctrl+T"
+                      onAction={() => void handleCopy('totp')}
+                    >
+                      {t.copyTotp}
+                    </MenuItem>
+                  )}
+                  {urlDraft && (
+                    <MenuItem
+                      icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+                      shortcut="Ctrl+O"
+                      onAction={() => {
+                        window.open(urlDraft, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      {t.openUrl}
+                    </MenuItem>
+                  )}
+                  <MenuSeparator />
+                  <MenuItem
+                    variant="danger"
+                    icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Del"
+                    onAction={() => setDeleteConfirmId(uuid)}
+                  >
+                    {t.deleteEntry}
+                  </MenuItem>
+                </Menu>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3.5 min-w-0">
             <>
               <input
                 ref={iconFileInputRef}
@@ -620,8 +723,8 @@ export function EntryDetail({
                 </div>
               </Popover>
             </>
-            <div className="min-w-0 flex-1 flex flex-col gap-2">
-              <Input
+            <div className="min-w-0 flex-1 flex flex-col gap-1">
+              <input
                 ref={titleInputRef}
                 autoFocus={entryModalOpen}
                 required
@@ -629,115 +732,19 @@ export function EntryDetail({
                 aria-label={t.titleLabel}
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
-                className="text-base font-semibold h-9"
+                className="w-full rounded-md border border-transparent bg-transparent px-1.5 -mx-1.5 py-0.5 text-xl font-semibold tracking-tight text-fg placeholder:text-fg-subtle hover:border-border/70 focus:bg-surface focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
               />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <Input
-                  placeholder={t.groupLabel}
-                  aria-label={t.groupLabel}
-                  value={groupPathDraft || (entryModalOpen ? '' : 'Root')}
-                  readOnly={!entryModalOpen}
-                  onChange={(e) => setGroupPathDraft(e.target.value)}
-                  className={entryModalOpen ? 'h-7 text-xs' : 'h-7 text-xs text-fg-muted'}
-                />
-                <Input
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Tag className="h-3 w-3 shrink-0 text-fg-subtle" aria-hidden="true" />
+                <input
                   placeholder={t.tagsLabel}
                   aria-label={t.tagsLabel}
                   value={tagsDraft}
                   onChange={(e) => setTagsDraft(e.target.value)}
-                  className="h-7 text-xs"
+                  className="w-full rounded border border-transparent bg-transparent px-1.5 -mx-1 py-0.5 text-xs text-fg-muted placeholder:text-fg-subtle hover:border-border/70 focus:bg-surface focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
                 />
               </div>
             </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {entryModalOpen && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onPress={() => setEntryModalOpen(false)}
-              >
-                {t.cancel}
-              </Button>
-            )}
-
-            <Button
-              type="submit"
-              size="sm"
-              variant="primary"
-              isDisabled={entryModalOpen ? !titleDraft.trim() : !isViewDirty}
-              isLoading={entryModalOpen ? creating : updateMutation.isPending}
-            >
-              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-              {t.saveEntry}
-            </Button>
-
-            {!entryModalOpen && details && (
-              <>
-                <Menu
-                  trigger={
-                    <Button size="sm" variant="secondary" isIconOnly aria-label="Entry actions">
-                      <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                    </Button>
-                  }
-                >
-                  <MenuItem
-                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                    shortcut="Ctrl+C"
-                    onAction={() => void handleCopy('password')}
-                  >
-                    {t.copyPassword}
-                  </MenuItem>
-                  <MenuItem
-                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                    shortcut="Ctrl+B"
-                    onAction={() => void handleCopy('username')}
-                  >
-                    {t.copyUsername}
-                  </MenuItem>
-                  {details.hasOtp && (
-                    <MenuItem
-                      icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                      shortcut="Ctrl+Shift+C"
-                      onAction={() => void handleCopy('totp')}
-                    >
-                      {t.copyTotp}
-                    </MenuItem>
-                  )}
-                  {urlDraft && (
-                    <MenuItem
-                      icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
-                      onAction={() => {
-                        window.open(urlDraft, '_blank', 'noopener,noreferrer');
-                      }}
-                    >
-                      {t.openUrl}
-                    </MenuItem>
-                  )}
-                  <MenuSeparator />
-                  <MenuItem
-                    variant="danger"
-                    icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
-                    shortcut="Del"
-                    onAction={() => setDeleteConfirmId(uuid)}
-                  >
-                    {t.deleteEntry}
-                  </MenuItem>
-                </Menu>
-
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onPress={() => setDeleteConfirmId(uuid)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  {t.deleteEntry}
-                </Button>
-              </>
-            )}
           </div>
         </div>
 
