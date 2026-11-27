@@ -21,6 +21,8 @@ use tauri::State;
 use uuid::Uuid;
 
 const MAX_FAVICON_BYTES: u64 = 262_144;
+/// Tempo até tentar de novo um domínio sem favicon.
+const FAVICON_MISS_TTL: Duration = Duration::from_secs(60 * 60 * 24);
 
 struct UnlockedVault {
     vault: Vault,
@@ -96,6 +98,8 @@ struct NewEntryPayload {
     notes: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    icon_id: Option<usize>,
+    custom_icon_base64: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +111,8 @@ struct EntryPatchPayload {
     url: Option<String>,
     notes: Option<String>,
     tags: Option<Vec<String>>,
+    icon_id: Option<usize>,
+    custom_icon_base64: Option<String>,
 }
 
 fn with_vault_mut<T>(
@@ -195,7 +201,7 @@ async fn create_vault(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state
         .session
@@ -205,17 +211,17 @@ fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_entries(state: State<'_, AppState>, query: String) -> Result<Vec<EntrySummary>, String> {
     with_vault_mut(&state, |u| Ok(u.vault.search(&query)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_group_tree(state: State<'_, AppState>) -> Result<GroupNode, String> {
     with_vault_mut(&state, |u| Ok(u.vault.group_tree()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_entry_details(state: State<'_, AppState>, uuid: String) -> Result<EntryDetailsDto, String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
@@ -226,7 +232,7 @@ fn get_entry_details(state: State<'_, AppState>, uuid: String) -> Result<EntryDe
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_entry_password(state: State<'_, AppState>, uuid: String) -> Result<String, String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
@@ -235,7 +241,7 @@ fn reveal_entry_password(state: State<'_, AppState>, uuid: String) -> Result<Str
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn copy_entry_field(
     state: State<'_, AppState>,
     uuid: String,
@@ -269,13 +275,13 @@ fn copy_entry_field(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_entry_totp(state: State<'_, AppState>, uuid: String) -> Result<OtpCode, String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| u.vault.totp_now(parsed).map_err(|e| e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_entry_history(
     state: State<'_, AppState>,
     uuid: String,
@@ -286,8 +292,30 @@ fn get_entry_history(
     })
 }
 
-#[tauri::command]
+fn decode_custom_icon_b64(data_base64: &str) -> Result<Vec<u8>, String> {
+    let raw_b64 = data_base64
+        .split_once(";base64,")
+        .map_or(data_base64, |(_, rest)| rest)
+        .trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw_b64)
+        .map_err(|e| e.to_string())?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_FAVICON_BYTES * 2 {
+        return Err("imagem inválida ou muito grande".to_owned());
+    }
+    if detect_icon_mime(&bytes).is_none() {
+        return Err("formato de imagem não suportado".to_owned());
+    }
+    Ok(bytes)
+}
+
+#[tauri::command(async)]
 fn add_entry(state: State<'_, AppState>, payload: NewEntryPayload) -> Result<String, String> {
+    let custom_icon_bytes = payload
+        .custom_icon_base64
+        .as_deref()
+        .map(decode_custom_icon_b64)
+        .transpose()?;
     with_vault_mut(&state, |u| {
         let uuid = u
             .vault
@@ -304,6 +332,15 @@ fn add_entry(state: State<'_, AppState>, payload: NewEntryPayload) -> Result<Str
                 },
             )
             .map_err(|e| e.to_string())?;
+        if let Some(bytes) = custom_icon_bytes {
+            u.vault
+                .set_entry_custom_icon(uuid, bytes)
+                .map_err(|e| e.to_string())?;
+        } else if let Some(icon_id) = payload.icon_id {
+            u.vault
+                .set_entry_builtin_icon(uuid, icon_id)
+                .map_err(|e| e.to_string())?;
+        }
         u.vault
             .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
             .map_err(|e| e.to_string())?;
@@ -311,13 +348,18 @@ fn add_entry(state: State<'_, AppState>, payload: NewEntryPayload) -> Result<Str
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_entry(
     state: State<'_, AppState>,
     uuid: String,
     patch: EntryPatchPayload,
 ) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    let custom_icon_bytes = patch
+        .custom_icon_base64
+        .as_deref()
+        .map(decode_custom_icon_b64)
+        .transpose()?;
     with_vault_mut(&state, |u| {
         u.vault
             .edit_entry(
@@ -333,13 +375,22 @@ fn update_entry(
                 },
             )
             .map_err(|e| e.to_string())?;
+        if let Some(bytes) = custom_icon_bytes {
+            u.vault
+                .set_entry_custom_icon(parsed, bytes)
+                .map_err(|e| e.to_string())?;
+        } else if let Some(icon_id) = patch.icon_id {
+            u.vault
+                .set_entry_builtin_icon(parsed, icon_id)
+                .map_err(|e| e.to_string())?;
+        }
         u.vault
             .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
             .map_err(|e| e.to_string())
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn restore_history(state: State<'_, AppState>, uuid: String, index: usize) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
@@ -352,7 +403,7 @@ fn restore_history(state: State<'_, AppState>, uuid: String, index: usize) -> Re
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_entry(
     state: State<'_, AppState>,
     uuid: String,
@@ -369,7 +420,7 @@ fn delete_entry(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn move_entry(
     state: State<'_, AppState>,
     uuid: String,
@@ -386,7 +437,7 @@ fn move_entry(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_custom_icon(state: State<'_, AppState>, uuid: String) -> Result<Option<String>, String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
@@ -401,7 +452,7 @@ fn get_custom_icon(state: State<'_, AppState>, uuid: String) -> Result<Option<St
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_group(state: State<'_, AppState>, group_path: String) -> Result<String, String> {
     with_vault_mut(&state, |u| {
         let uuid = u
@@ -413,6 +464,36 @@ fn create_group(state: State<'_, AppState>, group_path: String) -> Result<String
             .map_err(|e| e.to_string())?;
         Ok(uuid.to_string())
     })
+}
+
+fn extract_domain_from_url(raw_url: &str) -> Option<String> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .split_once("://")
+        .map_or(trimmed, |(_, rest)| rest);
+    let authority = without_scheme.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = host_port.split(':').next()?;
+    validate_public_domain(host)
+}
+
+#[tauri::command]
+async fn fetch_favicon_from_url(url: String) -> Result<String, String> {
+    let clean_domain = extract_domain_from_url(&url)
+        .ok_or_else(|| "URL inválida ou domínio não público".to_owned())?;
+
+    let (bytes, mime) = tauri::async_runtime::spawn_blocking(move || {
+        fetch_favicon_for_domain(&clean_domain)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "não foi possível baixar o ícone desta URL".to_owned())?;
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
 }
 
 #[tauri::command]
@@ -431,7 +512,7 @@ fn generate_passphrase_cmd(words: usize) -> Result<String, String> {
     Ok(phrase.expose_secret().to_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn analyze_health_cmd(state: State<'_, AppState>) -> Result<HealthReport, String> {
     with_vault_mut(&state, |u| Ok(analyze_health(&u.vault)))
 }
@@ -539,8 +620,33 @@ fn fetch_icon_bytes(agent: &ureq::Agent, url: &str) -> Option<(Vec<u8>, &'static
     Some((buf, mime))
 }
 
+fn fetch_favicon_for_domain_with(
+    agent: &ureq::Agent,
+    clean_domain: &str,
+) -> Option<(Vec<u8>, &'static str)> {
+    let candidates = [
+        format!("https://{clean_domain}/favicon.ico"),
+        format!("https://{clean_domain}/apple-touch-icon.png"),
+        format!("https://{clean_domain}/favicon.png"),
+    ];
+    candidates
+        .iter()
+        .find_map(|url| fetch_icon_bytes(agent, url))
+}
+
+fn fetch_favicon_for_domain(clean_domain: &str) -> Option<(Vec<u8>, &'static str)> {
+    let agent_config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(4)))
+        .build();
+    let agent: ureq::Agent = agent_config.into();
+    fetch_favicon_for_domain_with(&agent, clean_domain)
+}
+
 #[tauri::command]
-fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<String>, String> {
+async fn get_favicon(
+    state: State<'_, AppState>,
+    domain: String,
+) -> Result<Option<String>, String> {
     let enabled = state
         .config
         .lock()
@@ -555,6 +661,13 @@ fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<Stri
         return Ok(None);
     };
 
+    // Rede e disco em uma thread de bloqueio, para nunca travar a interface.
+    tauri::async_runtime::spawn_blocking(move || load_favicon(&clean_domain))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn load_favicon(clean_domain: &str) -> Option<String> {
     let cache_path = favicon_cache_dir().map(|dir| dir.join(format!("{clean_domain}.b64")));
     if let Some(ref path) = cache_path
         && path.exists()
@@ -564,7 +677,15 @@ fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<Stri
         && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64.trim())
         && detect_icon_mime(&decoded).is_some()
     {
-        return Ok(Some(cached));
+        return Some(cached);
+    }
+
+    let miss_path = cache_path.as_ref().map(|path| path.with_extension("miss"));
+    if let Some(ref path) = miss_path
+        && let Ok(modified) = fs::metadata(path).and_then(|m| m.modified())
+        && modified.elapsed().is_ok_and(|age| age < FAVICON_MISS_TTL)
+    {
+        return None;
     }
 
     let agent_config = ureq::Agent::config_builder()
@@ -572,16 +693,14 @@ fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<Stri
         .build();
     let agent: ureq::Agent = agent_config.into();
 
-    let candidates = [
-        format!("https://{clean_domain}/favicon.ico"),
-        format!("https://{clean_domain}/apple-touch-icon.png"),
-        format!("https://{clean_domain}/favicon.png"),
-    ];
-    let Some((bytes, mime)) = candidates
-        .iter()
-        .find_map(|url| fetch_icon_bytes(&agent, url))
-    else {
-        return Ok(None);
+    let Some((bytes, mime)) = fetch_favicon_for_domain_with(&agent, clean_domain) else {
+        if let Some(path) = miss_path {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(path, b"");
+        }
+        return None;
     };
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -594,7 +713,7 @@ fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<Stri
         let _ = fs::write(path, &data_url);
     }
 
-    Ok(Some(data_url))
+    Some(data_url)
 }
 
 #[tauri::command]
@@ -662,6 +781,7 @@ pub fn run() {
             move_entry,
             get_custom_icon,
             create_group,
+            fetch_favicon_from_url,
             generate_password_cmd,
             generate_passphrase_cmd,
             analyze_health_cmd,

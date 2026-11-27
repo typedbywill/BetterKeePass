@@ -102,6 +102,8 @@ export interface NewEntryPayload {
   url?: string;
   notes?: string;
   tags: string[];
+  iconId?: number;
+  customIconBase64?: string;
 }
 
 export interface EntryPatchPayload {
@@ -111,6 +113,8 @@ export interface EntryPatchPayload {
   url?: string;
   notes?: string;
   tags?: string[];
+  iconId?: number;
+  customIconBase64?: string;
 }
 
 const hasTauri = () =>
@@ -387,6 +391,12 @@ export const api = {
     if (patch.tags !== undefined) found.summary.tags = patch.tags;
     if (patch.notes !== undefined) found.notes = patch.notes;
     if (patch.password !== undefined) found._secret = patch.password;
+    if (patch.customIconBase64 !== undefined) {
+      found.summary.customIconUuid = `mock-icon-${uuid}`;
+    } else if (patch.iconId !== undefined) {
+      found.summary.iconId = patch.iconId;
+      found.summary.customIconUuid = null;
+    }
   },
   async restoreHistory(uuid: string, index: number): Promise<void> {
     if (hasTauri()) {
@@ -440,6 +450,12 @@ export const api = {
       mockExtraGroups.push(clean);
     }
     return `mock-${clean}`;
+  },
+  async fetchFaviconFromUrl(url: string): Promise<string> {
+    if (hasTauri()) {
+      return invoke('fetch_favicon_from_url', { url });
+    }
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
   },
   async generatePassword(length = 20): Promise<string> {
     if (hasTauri()) {

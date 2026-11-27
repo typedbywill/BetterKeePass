@@ -228,4 +228,37 @@ describe('BetterKeePass Desktop UI', () => {
     expect(await within(sidebar).findByText('Trabalho')).toBeInTheDocument();
     createGroupSpy.mockRestore();
   });
+
+  it('stages icon change in draft and only saves to vault on Save button click', async () => {
+    const updateSpy = vi.spyOn(api, 'updateEntry');
+    renderApp();
+    await unlockDemoVault();
+
+    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    expect(within(entryList).queryByRole('searchbox')).not.toBeInTheDocument();
+
+    fireEvent.click(within(entryList).getByText('GitHub'));
+    const detail = screen.getByRole('region', { name: 'Detalhes da entrada' });
+    const avatarBtn = await within(detail).findByRole('button', { name: 'Alterar ícone' });
+    fireEvent.click(avatarBtn);
+
+    expect(screen.getByText('Como deseja definir o ícone?')).toBeInTheDocument();
+    expect(screen.getByText('Baixar ícone da URL')).toBeInTheDocument();
+    expect(screen.getByText('Ícone personalizado')).toBeInTheDocument();
+
+    // Pick built-in icon: should NOT call updateEntry yet
+    const grid = screen.getByText('Ou escolha um ícone padrão').nextElementSibling!;
+    const firstIconBtn = grid.querySelector('button')!;
+    fireEvent.click(firstIconBtn);
+    expect(updateSpy).not.toHaveBeenCalled();
+
+    // Now click Save button -> persists icon to vault
+    fireEvent.click(within(detail).getByRole('button', { name: /Salvar entrada/i }));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', {
+        iconId: 0,
+      });
+    });
+    updateSpy.mockRestore();
+  });
 });

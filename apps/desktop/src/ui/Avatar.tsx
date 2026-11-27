@@ -18,14 +18,6 @@ function extractHost(url?: string): string | null {
   }
 }
 
-function hashHue(seed: string): number {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return hash % 360;
-}
-
 function initialsFrom(title: string): string {
   const words = title.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '?';
@@ -38,6 +30,7 @@ export interface AvatarProps {
   url?: string;
   iconId?: number | null;
   customIconUuid?: string | null;
+  previewSrc?: string | null;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
@@ -59,6 +52,7 @@ export function Avatar({
   url,
   iconId,
   customIconUuid,
+  previewSrc,
   size = 'md',
   className,
 }: AvatarProps) {
@@ -69,25 +63,26 @@ export function Avatar({
   const customIconQuery = useQuery({
     queryKey: ['custom-icon', customIconUuid],
     queryFn: () => api.getCustomIcon(customIconUuid!),
-    enabled: Boolean(customIconUuid),
+    enabled: Boolean(customIconUuid && !previewSrc),
     staleTime: Infinity,
   });
 
   const faviconQuery = useQuery({
     queryKey: ['favicon', host],
     queryFn: () => api.getFavicon(host!),
-    enabled: Boolean(!customIconUuid && faviconsEnabled && host),
+    enabled: Boolean(!previewSrc && !customIconUuid && faviconsEnabled && host),
     staleTime: 1000 * 60 * 30,
   });
 
   const imageSrc =
-    customIconQuery.data ?? (faviconsEnabled ? faviconQuery.data : null) ?? null;
+    previewSrc ??
+    customIconQuery.data ??
+    (faviconsEnabled ? faviconQuery.data : null) ??
+    null;
 
   useEffect(() => {
     setImgFailed(false);
   }, [imageSrc]);
-
-  const hue = hashHue(host || title || 'betterkeepass');
 
   if (imageSrc && !imgFailed) {
     return (
@@ -113,13 +108,8 @@ export function Avatar({
   return (
     <span
       aria-hidden="true"
-      style={{
-        backgroundColor: `hsla(${hue}, 62%, 48%, 0.16)`,
-        color: `hsl(${hue}, 68%, 52%)`,
-        borderColor: `hsla(${hue}, 62%, 48%, 0.28)`,
-      }}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center border font-semibold tracking-tight select-none',
+        'inline-flex shrink-0 items-center justify-center border border-border bg-bg-muted text-fg-muted font-semibold tracking-tight select-none',
         sizeClasses[size],
         className,
       )}

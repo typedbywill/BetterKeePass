@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EyeOff } from 'lucide-react';
 import { CommandPalette } from './components/CommandPalette';
 import { EntryDetail } from './components/EntryDetail';
@@ -52,7 +52,6 @@ export function App() {
   } = useUiStore();
 
   const t = getTranslations(language);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
   const [editRequestNonce, setEditRequestNonce] = useState(0);
 
@@ -76,10 +75,15 @@ export function App() {
     }
   }, [configQuery.data, configHydrated, hydrateFromConfig]);
 
+  const faviconsWereEnabled = useRef(faviconsEnabled);
+
   // Persist discrete UI preferences immediately so toggles (e.g. favicons, expandedGroups)
   // never race with backend checks or app shutdown.
   useEffect(() => {
     if (!configHydrated || configQuery.data?.managedByNix) return;
+    // Só refaz a busca quando os favicons acabaram de ser ligados.
+    const faviconsTurnedOn = faviconsEnabled && !faviconsWereEnabled.current;
+    faviconsWereEnabled.current = faviconsEnabled;
     void api
       .setUiConfig({
         theme,
@@ -92,7 +96,7 @@ export function App() {
         expandedGroups,
       })
       .then(() => {
-        if (faviconsEnabled) {
+        if (faviconsTurnedOn) {
           void queryClient.invalidateQueries({ queryKey: ['favicon'] });
         }
       });
@@ -138,6 +142,7 @@ export function App() {
     queryKey: ['entries', searchQuery],
     queryFn: () => api.listEntries(searchQuery),
     enabled: unlocked,
+    placeholderData: keepPreviousData,
   });
 
   const treeQuery = useQuery({
@@ -213,7 +218,7 @@ export function App() {
     hasOpenModal:
       commandPaletteOpen || entryModalOpen || shortcutsOpen || Boolean(deleteConfirmId),
     onOpenPalette: () => setCommandPaletteOpen(true),
-    onFocusSearch: () => searchInputRef.current?.focus(),
+    onFocusSearch: () => setCommandPaletteOpen(true),
     onMoveSelection: moveSelection,
     onFocusDetail: () => detailRef.current?.focus(),
     onCopyPassword: () => void copySelected('password'),
@@ -284,7 +289,6 @@ export function App() {
               t={t}
               entries={visibleEntries}
               isLoading={entriesQuery.isLoading}
-              searchInputRef={searchInputRef}
             />
             <ResizeHandle
               value={listWidth}

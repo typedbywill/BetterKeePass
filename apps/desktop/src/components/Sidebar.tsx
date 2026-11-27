@@ -524,7 +524,7 @@ export function Sidebar({
                 onCancel={() => setCreatingRootGroup(false)}
               />
             )}
-            <ul className="flex flex-col gap-0.5 overflow-y-auto pr-0.5">
+            <ul className="flex flex-col gap-0.5 overflow-y-auto -mx-3 px-3 pb-1">
               {rootGroups.map((group) => (
                 <GroupTreeItem key={group.uuid} t={t} node={group} depth={0} />
               ))}

@@ -576,6 +576,30 @@ impl Vault {
             .map(|icon| icon.data.clone())
     }
 
+    /// Define um ícone customizado embutido no cofre para a entrada informada.
+    pub fn set_entry_custom_icon(&mut self, uuid: Uuid, icon_bytes: Vec<u8>) -> Result<()> {
+        let entry_id = EntryId::from_uuid(uuid);
+        let mut entry = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        entry.set_icon_custom_new(icon_bytes);
+        entry.times.last_modification = Some(Times::now());
+        Ok(())
+    }
+
+    /// Define um ícone padrão KeePass para a entrada informada.
+    pub fn set_entry_builtin_icon(&mut self, uuid: Uuid, icon_id: usize) -> Result<()> {
+        let entry_id = EntryId::from_uuid(uuid);
+        let mut entry = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        entry.set_icon_builtin(icon_id);
+        entry.times.last_modification = Some(Times::now());
+        Ok(())
+    }
+
     /// Esvazia todas as entradas da lixeira e retorna quantas foram removidas.
     pub fn empty_recycle_bin(&mut self) -> usize {
         let Some(recycle_id) = self.db.meta.recyclebin_uuid.map(GroupId::from_uuid) else {

@@ -1,20 +1,26 @@
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button as AriaButton } from 'react-aria-components';
 import { motion } from 'framer-motion';
 import {
+  Camera,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   ExternalLink,
+  Globe,
   History,
   MoreHorizontal,
   Paperclip,
   RotateCcw,
   ShieldCheck,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import type { Translations } from '../i18n/pt-BR';
+import { getKeepassIcon } from '../lib/keepassIcons';
 import {
   api,
   type EntryDetailsView,
@@ -34,10 +40,13 @@ import {
   MenuSeparator,
   PasswordGeneratorPopover,
   PasswordInput,
+  Popover,
   ProgressRing,
   StrengthMeter,
   TextArea,
 } from '../ui';
+
+const QUICK_BUILTIN_ICONS = [0, 1, 3, 19, 23, 28, 30, 38, 45, 62, 65, 68];
 
 function formatTotpCode(code: string): string {
   if (code.length === 6) return `${code.slice(0, 3)} ${code.slice(3)}`;
@@ -90,10 +99,18 @@ export function EntryDetail({
   } = useUiStore();
 
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const iconFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [totpRemaining, setTotpRemaining] = useState<number>(30);
   const [showCustomFields, setShowCustomFields] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [iconPopoverOpen, setIconPopoverOpen] = useState(false);
+  const [iconBusy, setIconBusy] = useState(false);
+  const [iconDraft, setIconDraft] = useState<
+    | { kind: 'builtin'; iconId: number }
+    | { kind: 'custom'; dataUrl: string }
+    | null
+  >(null);
 
   // Unified form drafts for both creation and view/edit modes
   const [titleDraft, setTitleDraft] = useState('');
@@ -140,11 +157,13 @@ export function EntryDetail({
     setPasswordDraft('');
     setUrlDraft('');
     setNotesDraft('');
+    setIconDraft(null);
   }, [entryModalOpen, groupFilter]);
 
-  // Reset password draft when switching selected entry
+  // Reset password & icon draft when switching selected entry
   useEffect(() => {
     setPasswordDraft('');
+    setIconDraft(null);
   }, [selectedEntryId]);
 
   // Hydrate drafts from fetched entry details
@@ -231,12 +250,14 @@ export function EntryDetail({
       }
     },
     onSuccess: async (_data, vars) => {
+      setIconDraft(null);
       pushToast({ kind: 'success', title: t.savedToast });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['entries'] }),
         queryClient.invalidateQueries({ queryKey: ['entry-details', vars.uuid] }),
         queryClient.invalidateQueries({ queryKey: ['entry-password', vars.uuid] }),
         queryClient.invalidateQueries({ queryKey: ['entry-history', vars.uuid] }),
+        queryClient.invalidateQueries({ queryKey: ['custom-icon'] }),
         queryClient.invalidateQueries({ queryKey: ['group-tree'] }),
       ]);
     },
@@ -255,7 +276,7 @@ export function EntryDetail({
     },
   });
 
-  if (!entryModalOpen && (!selectedEntryId || !detailsQuery.data)) {
+  if (!entryModalOpen && !selectedEntryId) {
     return (
       <section
         ref={detailRef}
@@ -278,6 +299,38 @@ export function EntryDetail({
     );
   }
 
+  if (!entryModalOpen && selectedEntryId && detailsQuery.isError) {
+    const errMsg =
+      detailsQuery.error instanceof Error
+        ? detailsQuery.error.message
+        : String(detailsQuery.error);
+    return (
+      <section
+        ref={detailRef}
+        tabIndex={-1}
+        aria-label="Detalhes da entrada"
+        className="flex-1 flex items-center justify-center p-8 bg-bg-subtle/40 outline-none"
+      >
+        <EmptyState
+          icon={<ShieldCheck className="h-5 w-5 text-danger" aria-hidden="true" />}
+          title={t.noEntrySelectedTitle}
+          description={errMsg}
+        />
+      </section>
+    );
+  }
+
+  if (!entryModalOpen && !detailsQuery.data) {
+    return (
+      <section
+        ref={detailRef}
+        tabIndex={-1}
+        aria-label="Detalhes da entrada"
+        className="flex-1 bg-bg p-6 lg:px-10 lg:py-7 outline-none"
+      />
+    );
+  }
+
   const details = entryModalOpen ? null : detailsQuery.data!;
   const uuid = details?.summary.uuid ?? '';
   const loadedPassword = passwordQuery.data ?? '';
@@ -291,7 +344,8 @@ export function EntryDetail({
         urlDraft.trim() !== details.summary.url ||
         notesDraft !== details.notes ||
         parseTags(tagsDraft).join(',') !== details.summary.tags.join(',') ||
-        passwordDirty),
+        passwordDirty ||
+        iconDraft !== null),
   );
 
   async function handleSave(e?: FormEvent) {
@@ -308,7 +362,10 @@ export function EntryDetail({
           url: urlDraft.trim() || undefined,
           notes: notesDraft.trim() || undefined,
           tags: parseTags(tagsDraft),
+          iconId: iconDraft?.kind === 'builtin' ? iconDraft.iconId : undefined,
+          customIconBase64: iconDraft?.kind === 'custom' ? iconDraft.dataUrl : undefined,
         });
+        setIconDraft(null);
         setEntryModalOpen(false);
         setSelectedEntryId(createdUuid);
         pushToast({ kind: 'success', title: t.savedToast });
@@ -342,6 +399,11 @@ export function EntryDetail({
     if (passwordDirty) {
       patch.password = passwordDraft;
     }
+    if (iconDraft?.kind === 'custom') {
+      patch.customIconBase64 = iconDraft.dataUrl;
+    } else if (iconDraft?.kind === 'builtin') {
+      patch.iconId = iconDraft.iconId;
+    }
     if (Object.keys(patch).length > 0) {
       updateMutation.mutate({ uuid, patch });
     }
@@ -368,6 +430,49 @@ export function EntryDetail({
       ? ''
       : passwordDraft;
 
+  async function handleDownloadFaviconFromUrl() {
+    if (!urlDraft.trim() || iconBusy) return;
+    setIconBusy(true);
+    try {
+      const dataUrl = await api.fetchFaviconFromUrl(urlDraft.trim());
+      setIconDraft({ kind: 'custom', dataUrl });
+      setIconPopoverOpen(false);
+    } catch {
+      pushToast({ kind: 'danger', title: t.iconDownloadError });
+    } finally {
+      setIconBusy(false);
+    }
+  }
+
+  function handleCustomIconFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result) return;
+      setIconDraft({ kind: 'custom', dataUrl: result });
+      setIconPopoverOpen(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleSelectBuiltinIcon(iconId: number) {
+    setIconDraft({ kind: 'builtin', iconId });
+    setIconPopoverOpen(false);
+  }
+
+  const previewSrc = iconDraft?.kind === 'custom' ? iconDraft.dataUrl : null;
+  const effectiveIconId =
+    iconDraft?.kind === 'builtin'
+      ? iconDraft.iconId
+      : iconDraft?.kind === 'custom'
+        ? null
+        : details?.summary.iconId;
+  const effectiveCustomIconUuid =
+    iconDraft !== null ? null : details?.summary.customIconUuid;
+
   return (
     <section
       ref={detailRef}
@@ -392,13 +497,121 @@ export function EntryDetail({
         {/* Header — aberto e em largura total */}
         <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-border/70">
           <div className="flex items-start gap-3.5 min-w-0 flex-1">
-            <Avatar
-              title={titleDraft || t.newEntry}
-              url={urlDraft}
-              iconId={details?.summary.iconId}
-              customIconUuid={details?.summary.customIconUuid}
-              size="lg"
-            />
+            <>
+              <input
+                ref={iconFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp,image/x-icon,.ico"
+                className="hidden"
+                onChange={handleCustomIconFileChange}
+              />
+              <Popover
+                isOpen={iconPopoverOpen}
+                onOpenChange={setIconPopoverOpen}
+                placement="bottom start"
+                className="w-72 p-3"
+                trigger={
+                  <AriaButton
+                    aria-label={t.changeIcon}
+                    className="group/avatar relative rounded-xl cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Avatar
+                      title={titleDraft || t.newEntry}
+                      url={urlDraft}
+                      iconId={effectiveIconId}
+                      customIconUuid={effectiveCustomIconUuid}
+                      previewSrc={previewSrc}
+                      size="lg"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/55 text-white opacity-0 group-hover/avatar:opacity-100 transition-opacity"
+                    >
+                      <Camera className="h-4 w-4" />
+                    </span>
+                  </AriaButton>
+                }
+              >
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-fg">{t.changeIconTitle}</p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      type="button"
+                      disabled={!urlDraft.trim() || iconBusy}
+                      onClick={() => void handleDownloadFaviconFromUrl()}
+                      className="flex items-start gap-2.5 rounded-lg border border-border p-2.5 text-left hover:bg-surface-hover transition-colors disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                    >
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-bg-muted text-fg">
+                        {iconBusy ? (
+                          <Download className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
+                        ) : (
+                          <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium text-fg">
+                          {t.downloadIconFromUrl}
+                        </span>
+                        <span className="block text-[11px] text-fg-muted leading-snug mt-0.5">
+                          {urlDraft.trim() ? t.downloadIconFromUrlDesc : t.downloadIconNeedsUrl}
+                        </span>
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={iconBusy}
+                      onClick={() => iconFileInputRef.current?.click()}
+                      className="flex items-start gap-2.5 rounded-lg border border-border p-2.5 text-left hover:bg-surface-hover transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-bg-muted text-fg">
+                        <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium text-fg">
+                          {t.uploadCustomIcon}
+                        </span>
+                        <span className="block text-[11px] text-fg-muted leading-snug mt-0.5">
+                          {t.uploadCustomIconDesc}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="border-t border-border pt-2.5 flex flex-col gap-1.5">
+                    <p className="text-[11px] font-medium text-fg-muted">
+                      {t.builtinIconsLabel}
+                    </p>
+                    <div className="grid grid-cols-6 gap-1">
+                      {QUICK_BUILTIN_ICONS.map((iconId) => {
+                        const IconComp = getKeepassIcon(iconId);
+                        if (!IconComp) return null;
+                        const isCurrent =
+                          !previewSrc && effectiveIconId === iconId;
+                        return (
+                          <button
+                            key={iconId}
+                            type="button"
+                            disabled={iconBusy}
+                            onClick={() => handleSelectBuiltinIcon(iconId)}
+                            className={
+                              isCurrent
+                                ? 'flex h-8 items-center justify-center rounded-md border border-ring bg-accent-subtle text-accent cursor-pointer'
+                                : 'flex h-8 items-center justify-center rounded-md border border-transparent text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer'
+                            }
+                          >
+                            <IconComp className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </Popover>
+            </>
             <div className="min-w-0 flex-1 flex flex-col gap-2">
               <Input
                 ref={titleInputRef}

@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import type { Language } from '../i18n';
 import type { UiConfig } from '../lib/tauri';
+import { isThemeMode, type ThemeMode } from '../lib/theme';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type { ThemeMode };
 export type ActiveView = 'vault' | 'health' | 'settings';
 export type GroupFilter = 'all' | 'passkeys' | 'trash' | { groupPath: string };
 export type SortBy = 'title' | 'recent';
@@ -164,10 +165,7 @@ export const useUiStore = create<UiState>((set) => ({
         saveExpandedGroups(nextExpanded);
       }
       return {
-        theme:
-          ui.theme === 'light' || ui.theme === 'dark' || ui.theme === 'system'
-            ? ui.theme
-            : state.theme,
+        theme: isThemeMode(ui.theme) ? ui.theme : state.theme,
         language: ui.language === 'en' || ui.language === 'pt-BR' ? ui.language : state.language,
         presentationMode: Boolean(ui.presentationMode),
         sidebarCollapsed: Boolean(ui.sidebarCollapsed),

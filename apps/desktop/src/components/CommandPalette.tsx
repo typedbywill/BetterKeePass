@@ -7,6 +7,7 @@ import {
   Lock,
   Monitor,
   Moon,
+  Palette,
   Plus,
   Search,
   Settings,
@@ -15,6 +16,7 @@ import {
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
 import { api, type EntrySummary } from '../lib/tauri';
+import { CUSTOM_THEMES } from '../lib/theme';
 import { useUiStore } from '../store/ui';
 import { Avatar, Badge, Dialog, Kbd } from '../ui';
 
@@ -151,6 +153,18 @@ export function CommandPalette({
           setCommandPaletteOpen(false);
         },
       },
+      ...CUSTOM_THEMES.map(
+        (customTheme): PaletteItem => ({
+          kind: 'command',
+          id: `theme-${customTheme.id}`,
+          label: `${t.themeLabel}: ${customTheme.name}`,
+          icon: <Palette className="h-3.5 w-3.5" aria-hidden="true" />,
+          run: () => {
+            setTheme(customTheme.id);
+            setCommandPaletteOpen(false);
+          },
+        }),
+      ),
       {
         kind: 'command',
         id: 'shortcuts',
