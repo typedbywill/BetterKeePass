@@ -10,10 +10,10 @@ use std::{
 use argon2::{Config as Argon2Config, Variant as Argon2Variant, Version as Argon2Version};
 use base64::Engine as _;
 use bkp_core::{
-    AppConfig, BrowserIntegrationConfig, ClipboardConfig, EntryDetails, EntryPatch, EntrySummary,
-    GroupNode, HealthReport, HistoryEntrySummary, NewEntry, OtpCode, PasswordOptions,
-    SecretServiceConfig, SecurityConfig, SshAgentConfig, UiConfig, Vault, analyze_health,
-    generate_passphrase, generate_password,
+    AppConfig, BrowserIntegrationConfig, ClipboardConfig, CustomFieldInput, EntryDetails,
+    EntryPatch, EntrySummary, GroupNode, HealthReport, HistoryEntrySummary, NewEntry, OtpCode,
+    PasswordOptions, SecretServiceConfig, SecurityConfig, SshAgentConfig, UiConfig, Vault,
+    analyze_health, generate_passphrase, generate_password,
 };
 use bkp_platform::ClipboardManager;
 use bkp_protocol::PairedBrowser;
@@ -114,6 +114,14 @@ struct SetUiConfigResult {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CustomFieldPayload {
+    name: String,
+    value: String,
+    protected: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct NewEntryPayload {
     group_path: Option<String>,
     title: String,
@@ -125,6 +133,8 @@ struct NewEntryPayload {
     tags: Vec<String>,
     icon_id: Option<usize>,
     custom_icon_base64: Option<String>,
+    #[serde(default)]
+    custom_fields: Vec<CustomFieldPayload>,
 }
 
 #[derive(Deserialize)]
@@ -138,6 +148,8 @@ struct EntryPatchPayload {
     tags: Option<Vec<String>>,
     icon_id: Option<usize>,
     custom_icon_base64: Option<String>,
+    custom_fields: Option<Vec<CustomFieldPayload>>,
+    remove_custom_fields: Option<Vec<String>>,
 }
 
 fn with_vault_mut<T>(
@@ -618,6 +630,110 @@ fn reveal_entry_password(state: State<'_, AppState>, uuid: String) -> Result<Str
 }
 
 #[tauri::command(async)]
+fn reveal_custom_field(
+    state: State<'_, AppState>,
+    uuid: String,
+    name: String,
+) -> Result<String, String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        let secret = u
+            .vault
+            .entry_field_secret(parsed, &name)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "campo não encontrado".to_owned())?;
+        Ok(secret.expose_secret().to_owned())
+    })
+}
+
+#[tauri::command(async)]
+fn copy_custom_field(
+    state: State<'_, AppState>,
+    uuid: String,
+    name: String,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    let clear_secs = state
+        .config
+        .lock()
+        .map_err(|_| "falha ao ler configuração".to_owned())?
+        .clipboard
+        .clear_after_seconds;
+    let secret = with_vault_mut(&state, |u| {
+        u.vault
+            .entry_field_secret(parsed, &name)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "campo não encontrado".to_owned())
+    })?;
+    state
+        .clipboard
+        .copy_secret(&secret, clear_secs)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+fn add_entry_attachment(
+    state: State<'_, AppState>,
+    uuid: String,
+    name: String,
+    data_base64: String,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    let raw_b64 = data_base64
+        .split_once(";base64,")
+        .map_or(data_base64.as_str(), |(_, rest)| rest)
+        .trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw_b64)
+        .map_err(|e| e.to_string())?;
+    let clean_name = name.trim().to_owned();
+    if clean_name.is_empty() {
+        return Err("nome do anexo inválido".to_owned());
+    }
+    with_vault_mut(&state, |u| {
+        u.vault
+            .add_attachment(parsed, &clean_name, bytes)
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command(async)]
+fn save_entry_attachment(
+    state: State<'_, AppState>,
+    uuid: String,
+    name: String,
+    dest_path: String,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    let bytes = with_vault_mut(&state, |u| {
+        u.vault
+            .get_attachment(parsed, &name)
+            .map_err(|e| e.to_string())
+    })?;
+    fs::write(dest_path, bytes).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+fn remove_entry_attachment(
+    state: State<'_, AppState>,
+    uuid: String,
+    name: String,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        u.vault
+            .remove_attachment(parsed, &name)
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command(async)]
 fn copy_entry_field(state: State<'_, AppState>, uuid: String, field: String) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     let clear_secs = state
@@ -702,7 +818,16 @@ fn add_entry(state: State<'_, AppState>, payload: NewEntryPayload) -> Result<Str
                     url: payload.url,
                     notes: payload.notes,
                     tags: payload.tags,
-                    ..NewEntry::default()
+                    custom_fields: payload
+                        .custom_fields
+                        .into_iter()
+                        .filter(|f| !f.name.trim().is_empty())
+                        .map(|f| CustomFieldInput {
+                            name: f.name.trim().to_owned(),
+                            value: SecretString::from(f.value),
+                            protected: f.protected,
+                        })
+                        .collect(),
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -745,7 +870,18 @@ fn update_entry(
                     url: patch.url,
                     notes: patch.notes,
                     tags: patch.tags,
-                    custom_fields: Vec::new(),
+                    custom_fields: patch
+                        .custom_fields
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|f| !f.name.trim().is_empty())
+                        .map(|f| CustomFieldInput {
+                            name: f.name.trim().to_owned(),
+                            value: SecretString::from(f.value),
+                            protected: f.protected,
+                        })
+                        .collect(),
+                    remove_custom_fields: patch.remove_custom_fields.unwrap_or_default(),
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -1219,6 +1355,11 @@ pub fn run() {
             get_group_tree,
             get_entry_details,
             reveal_entry_password,
+            reveal_custom_field,
+            copy_custom_field,
+            add_entry_attachment,
+            save_entry_attachment,
+            remove_entry_attachment,
             copy_entry_field,
             get_entry_totp,
             get_entry_history,

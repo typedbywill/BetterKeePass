@@ -212,7 +212,7 @@ describe('BetterKeePass Desktop UI', () => {
     await unlockDemoVault();
 
     const sidebar = screen.getByRole('complementary', { name: 'Navegação do cofre' });
-    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const entryList = await screen.findByRole('region', { name: 'Lista de entradas' });
     const draggableRow = within(entryList).getByText('GitHub').closest('[draggable="true"]')!;
     const targetFolder = within(sidebar).getByText('Pessoal').closest('[data-group-path]')!;
 
@@ -262,7 +262,7 @@ describe('BetterKeePass Desktop UI', () => {
     renderApp();
     await unlockDemoVault();
 
-    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const entryList = await screen.findByRole('region', { name: 'Lista de entradas' });
     expect(within(entryList).queryByRole('searchbox')).not.toBeInTheDocument();
 
     fireEvent.click(within(entryList).getByText('GitHub'));
@@ -310,13 +310,13 @@ describe('BetterKeePass Desktop UI', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
 
-    const grafiteBtn = screen.getByRole('button', { name: 'Grafite' });
-    fireEvent.click(grafiteBtn);
-    expect(document.documentElement.getAttribute('data-theme')).toBe('grafite');
-    expect(grafiteBtn).toHaveAttribute('aria-pressed', 'true');
-    await waitFor(async () => expect((await api.getConfig()).ui.themePreset).toBe('grafite'));
+    const amoledBtn = screen.getByRole('button', { name: 'AMOLED' });
+    fireEvent.click(amoledBtn);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('amoled');
+    expect(amoledBtn).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(async () => expect((await api.getConfig()).ui.themePreset).toBe('amoled'));
     fireEvent.click(within(settings).getByRole('radio', { name: 'Escuro' }));
-    expect(document.documentElement.getAttribute('data-theme')).toBe('grafite');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('amoled');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     fireEvent.click(within(settings).getByRole('radio', { name: 'Claro' }));
 
@@ -335,7 +335,7 @@ describe('BetterKeePass Desktop UI', () => {
     renderApp();
     await unlockDemoVault();
 
-    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const entryList = await screen.findByRole('region', { name: 'Lista de entradas' });
     const githubRow = within(entryList).getByText('GitHub').closest('li')!;
     expect(within(githubRow).getByLabelText('Usuário')).toBeInTheDocument();
     expect(within(githubRow).getByLabelText('Senha')).toBeInTheDocument();
@@ -431,6 +431,7 @@ describe('BetterKeePass Desktop UI', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Configurações/i }));
 
+    fireEvent.click(await screen.findByRole('tab', { name: /Segurança e sessão/i }));
     const lockInput = await screen.findByLabelText(/Bloqueio automático \(segundos\)/i);
     fireEvent.change(lockInput, { target: { value: '45' } });
     fireEvent.blur(lockInput);
@@ -443,7 +444,8 @@ describe('BetterKeePass Desktop UI', () => {
       );
     });
 
-    const sshSwitch = screen.getByRole('switch', { name: /Agente SSH integrado/i });
+    fireEvent.click(screen.getByRole('tab', { name: /Integrações/i }));
+    const sshSwitch = await screen.findByRole('switch', { name: /Agente SSH integrado/i });
     fireEvent.click(sshSwitch);
 
     await waitFor(() => {
@@ -462,7 +464,7 @@ describe('BetterKeePass Desktop UI', () => {
     renderApp();
     await unlockDemoVault();
 
-    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const entryList = await screen.findByRole('region', { name: 'Lista de entradas' });
     const githubRow = within(entryList).getByText('GitHub');
     fireEvent.contextMenu(githubRow, { clientX: 120, clientY: 160 });
 

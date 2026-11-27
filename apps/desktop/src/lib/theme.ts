@@ -2,7 +2,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 
 export type ThemePreset =
   | 'default'
-  | 'grafite'
+  | 'amoled'
   | 'tokyo-night'
   | 'catppuccin'
   | 'nord'
@@ -23,14 +23,14 @@ export const THEME_PRESETS: readonly ThemePresetMeta[] = [
   {
     id: 'default',
     name: 'BetterKeePass',
-    lightSwatches: ['#fafafa', '#ffffff', '#10b981', '#171717'],
-    darkSwatches: ['#0a0a0a', '#171717', '#34d399', '#fafafa'],
-  },
-  {
-    id: 'grafite',
-    name: 'Grafite',
     lightSwatches: ['#f2f3f0', '#fafbf8', '#286d55', '#252d2b'],
     darkSwatches: ['#202428', '#292e33', '#7dbaa1', '#e4e8e7'],
+  },
+  {
+    id: 'amoled',
+    name: 'AMOLED',
+    lightSwatches: ['#fafafa', '#ffffff', '#10b981', '#171717'],
+    darkSwatches: ['#0a0a0a', '#171717', '#34d399', '#fafafa'],
   },
   {
     id: 'tokyo-night',

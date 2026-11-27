@@ -145,6 +145,12 @@ export interface PairedBrowser {
   pairedAt: string;
 }
 
+export interface CustomFieldPayload {
+  name: string;
+  value: string;
+  protected: boolean;
+}
+
 export interface NewEntryPayload {
   groupPath?: string;
   title: string;
@@ -155,6 +161,7 @@ export interface NewEntryPayload {
   tags: string[];
   iconId?: number;
   customIconBase64?: string;
+  customFields?: CustomFieldPayload[];
 }
 
 export interface EntryPatchPayload {
@@ -166,6 +173,8 @@ export interface EntryPatchPayload {
   tags?: string[];
   iconId?: number;
   customIconBase64?: string;
+  customFields?: CustomFieldPayload[];
+  removeCustomFields?: string[];
 }
 
 const hasTauri = () =>
@@ -541,6 +550,54 @@ export const api = {
     const found = mockEntries.find((e) => e.summary.uuid === uuid);
     return found?._secret ?? '';
   },
+  async revealCustomField(uuid: string, name: string): Promise<string> {
+    if (hasTauri()) {
+      return invoke('reveal_custom_field', { uuid, name });
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    const field = found?.customFields.find((f) => f.name === name);
+    return field?.value ?? '';
+  },
+  async copyCustomField(uuid: string, name: string): Promise<void> {
+    if (hasTauri()) {
+      await invoke('copy_custom_field', { uuid, name });
+      return;
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    const field = found?.customFields.find((f) => f.name === name);
+    if (field?.value && typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(field.value).catch(() => {});
+    }
+  },
+  async addAttachment(uuid: string, name: string, dataBase64: string): Promise<void> {
+    if (hasTauri()) {
+      await invoke('add_entry_attachment', { uuid, name, dataBase64 });
+      return;
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    if (found && !found.attachments.includes(name)) {
+      found.attachments.push(name);
+    }
+  },
+  async saveAttachment(uuid: string, name: string): Promise<boolean> {
+    if (hasTauri()) {
+      const destPath = await save({ defaultPath: name });
+      if (!destPath) return false;
+      await invoke('save_entry_attachment', { uuid, name, destPath });
+      return true;
+    }
+    return true;
+  },
+  async removeAttachment(uuid: string, name: string): Promise<void> {
+    if (hasTauri()) {
+      await invoke('remove_entry_attachment', { uuid, name });
+      return;
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    if (found) {
+      found.attachments = found.attachments.filter((a) => a !== name);
+    }
+  },
   async copySecret(uuid: string, field: 'password' | 'username' | 'totp'): Promise<void> {
     if (hasTauri()) {
       await invoke('copy_entry_field', { uuid, field });
@@ -597,7 +654,11 @@ export const api = {
       },
       notes: payload.notes ?? '',
       hasOtp: false,
-      customFields: [],
+      customFields: (payload.customFields ?? []).map((f) => ({
+        name: f.name,
+        value: f.protected ? null : f.value,
+        protected: f.protected,
+      })),
       attachments: [],
       _secret: payload.password ?? '',
     });
@@ -637,6 +698,22 @@ export const api = {
     } else if (patch.iconId !== undefined) {
       found.summary.iconId = patch.iconId;
       found.summary.customIconUuid = null;
+    }
+    if (patch.removeCustomFields?.length) {
+      const toRemove = new Set(patch.removeCustomFields);
+      found.customFields = found.customFields.filter((f) => !toRemove.has(f.name));
+    }
+    if (patch.customFields?.length) {
+      for (const cf of patch.customFields) {
+        const existingIdx = found.customFields.findIndex((f) => f.name === cf.name);
+        const nextView: CustomFieldView = {
+          name: cf.name,
+          value: cf.value,
+          protected: cf.protected,
+        };
+        if (existingIdx >= 0) found.customFields[existingIdx] = nextView;
+        else found.customFields.push(nextView);
+      }
     }
   },
   async restoreHistory(uuid: string, index: number): Promise<void> {

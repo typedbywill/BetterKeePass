@@ -172,6 +172,8 @@ pub struct EntryPatch {
     pub tags: Option<Vec<String>>,
     /// Campos customizados para inserir ou atualizar.
     pub custom_fields: Vec<CustomFieldInput>,
+    /// Nomes de campos customizados para remover.
+    pub remove_custom_fields: Vec<String>,
 }
 
 /// Cofre KeePass aberto em memória.
@@ -525,6 +527,9 @@ impl Vault {
             }
             if let Some(tags) = patch.tags {
                 tracked.tags = tags;
+            }
+            for name in patch.remove_custom_fields {
+                tracked.fields.remove(&name);
             }
             for field in patch.custom_fields {
                 if field.protected {
