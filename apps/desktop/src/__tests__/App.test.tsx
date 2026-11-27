@@ -462,6 +462,11 @@ describe('BetterKeePass Desktop UI', () => {
       );
     });
 
+    expect(screen.getByText(/Como adicionar a extensão no navegador/i)).toBeInTheDocument();
+    expect(screen.getByText(/extension\/\.output\/chrome-mv3/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Firefox' }));
+    expect(screen.getByText(/about:debugging#\/runtime\/this-firefox/i)).toBeInTheDocument();
+
     spy.mockRestore();
   });
 

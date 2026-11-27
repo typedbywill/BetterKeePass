@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
+  Copy,
   Globe,
   Info,
   Keyboard,
@@ -65,6 +66,7 @@ export function SettingsView({ t }: { t: Translations }) {
   const previewDark = resolveDark(theme);
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('appearance');
+  const [extensionBrowserTab, setExtensionBrowserTab] = useState<'chromium' | 'firefox'>('chromium');
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [lockSecondsDraft, setLockSecondsDraft] = useState('300');
   const [clipboardSecondsDraft, setClipboardSecondsDraft] = useState('15');
@@ -111,6 +113,11 @@ export function SettingsView({ t }: { t: Translations }) {
   async function handleRevoke(id: string) {
     await api.revokeBrowser(id);
     await queryClient.invalidateQueries({ queryKey: ['paired-browsers'] });
+  }
+
+  function copySnippet(value: string) {
+    void navigator.clipboard?.writeText(value);
+    pushToast({ kind: 'success', title: t.copiedToast, durationMs: 1500 });
   }
 
   const browserCount = browsersQuery.data?.length ?? 0;
@@ -589,6 +596,134 @@ export function SettingsView({ t }: { t: Translations }) {
                     aria-label={t.sshAgentLabel}
                   />
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-border bg-surface-muted/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-sm font-semibold text-fg">{t.extensionGuideTitle}</h4>
+                    <p className="text-xs text-fg-muted mt-0.5 leading-relaxed">
+                      {t.extensionGuideDesc}
+                    </p>
+                  </div>
+                  <SegmentedControl<'chromium' | 'firefox'>
+                    ariaLabel={t.extensionGuideTitle}
+                    value={extensionBrowserTab}
+                    onChange={setExtensionBrowserTab}
+                    options={[
+                      { value: 'chromium', label: t.extensionTabChromium },
+                      { value: 'firefox', label: t.extensionTabFirefox },
+                    ]}
+                  />
+                </div>
+
+                {extensionBrowserTab === 'chromium' ? (
+                  <ol className="mt-3.5 space-y-2.5 text-xs text-fg-muted list-decimal list-inside">
+                    <li>
+                      <span>{t.extensionStepBuildChromium}</span>
+                      <div className="mt-1 flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg">
+                        <span className="truncate">cd extension && pnpm build</span>
+                        <button
+                          type="button"
+                          onClick={() => copySnippet('cd extension && pnpm build')}
+                          className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                          aria-label={`${t.copyLabel} cd extension && pnpm build`}
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                          <span>{t.copyLabel}</span>
+                        </button>
+                      </div>
+                    </li>
+                    <li>
+                      <span>{t.extensionStepOpenChromium}</span>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {(['chrome://extensions', 'brave://extensions'] as const).map((url) => (
+                          <div
+                            key={url}
+                            className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-[11px] text-fg"
+                          >
+                            <span>{url}</span>
+                            <button
+                              type="button"
+                              onClick={() => copySnippet(url)}
+                              className="inline-flex items-center text-fg-muted hover:text-fg cursor-pointer"
+                              aria-label={`${t.copyLabel} ${url}`}
+                            >
+                              <Copy className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </li>
+                    <li>{t.extensionStepDevModeChromium}</li>
+                    <li>
+                      <span>{t.extensionStepLoadChromium}</span>
+                      <div className="mt-1 flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg">
+                        <span className="truncate">extension/.output/chrome-mv3</span>
+                        <button
+                          type="button"
+                          onClick={() => copySnippet('extension/.output/chrome-mv3')}
+                          className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                          aria-label={`${t.copyLabel} extension/.output/chrome-mv3`}
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                          <span>{t.copyLabel}</span>
+                        </button>
+                      </div>
+                    </li>
+                  </ol>
+                ) : (
+                  <ol className="mt-3.5 space-y-2.5 text-xs text-fg-muted list-decimal list-inside">
+                    <li>
+                      <span>{t.extensionStepBuildFirefox}</span>
+                      <div className="mt-1 flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg">
+                        <span className="truncate">cd extension && pnpm build:firefox</span>
+                        <button
+                          type="button"
+                          onClick={() => copySnippet('cd extension && pnpm build:firefox')}
+                          className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                          aria-label={`${t.copyLabel} cd extension && pnpm build:firefox`}
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                          <span>{t.copyLabel}</span>
+                        </button>
+                      </div>
+                    </li>
+                    <li>
+                      <span>{t.extensionStepOpenFirefox}</span>
+                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-[11px] text-fg">
+                        <span>about:debugging#/runtime/this-firefox</span>
+                        <button
+                          type="button"
+                          onClick={() => copySnippet('about:debugging#/runtime/this-firefox')}
+                          className="inline-flex items-center text-fg-muted hover:text-fg cursor-pointer"
+                          aria-label={`${t.copyLabel} about:debugging#/runtime/this-firefox`}
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </li>
+                    <li>
+                      <span>{t.extensionStepLoadFirefox}</span>
+                      <div className="mt-1 flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-fg">
+                        <span className="truncate">extension/.output/firefox-mv2/manifest.json</span>
+                        <button
+                          type="button"
+                          onClick={() => copySnippet('extension/.output/firefox-mv2/manifest.json')}
+                          className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                          aria-label={`${t.copyLabel} extension/.output/firefox-mv2/manifest.json`}
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                          <span>{t.copyLabel}</span>
+                        </button>
+                      </div>
+                    </li>
+                  </ol>
+                )}
+
+                <p className="mt-3 pt-2.5 border-t border-border/70 text-[11px] text-fg-muted leading-relaxed">
+                  {t.extensionNativeNote}
+                </p>
               </div>
             </div>
           )}
