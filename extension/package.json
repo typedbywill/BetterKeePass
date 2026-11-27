@@ -15,7 +15,7 @@
     "@types/chrome": "^0.0.312",
     "@types/node": "^22.13.10",
     "typescript": "^5.8.2",
-    "vitest": "^3.1.1",
+    "vitest": "^4.1.11",
     "wxt": "^0.21.5"
   }
 }
