@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'framer-motion';
 import {
   ChevronRight,
-  EyeOff,
   Folder,
   FolderOpen,
   HeartPulse,
@@ -426,12 +425,10 @@ export function Sidebar({
     setTheme,
     groupFilter,
     activeView,
-    presentationMode,
     sidebarCollapsed,
     toggleSidebar,
     setGroupFilter,
     setActiveView,
-    togglePresentationMode,
     setCommandPaletteOpen,
     setShortcutsOpen,
     setUnlocked,
@@ -622,14 +619,6 @@ export function Sidebar({
           icon={<Settings className="h-4 w-4" aria-hidden="true" />}
           label={t.settings}
           onClick={() => setActiveView('settings')}
-        />
-        <NavRow
-          active={presentationMode}
-          collapsed={sidebarCollapsed}
-          icon={<EyeOff className="h-4 w-4" aria-hidden="true" />}
-          label={t.presentationMode}
-          shortcut="Ctrl+Shift+P"
-          onClick={togglePresentationMode}
         />
         <div className={cn('flex gap-1', sidebarCollapsed ? 'flex-col' : 'items-center')}>
           <div className="flex-1">

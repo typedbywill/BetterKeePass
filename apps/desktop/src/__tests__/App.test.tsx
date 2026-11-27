@@ -91,7 +91,13 @@ describe('BetterKeePass Desktop UI', () => {
     const detail = screen.getByRole('region', { name: 'Detalhes da entrada' });
     await within(detail).findByLabelText('Usuário');
 
-    fireEvent.click(screen.getByRole('button', { name: /Modo apresentação/i }));
+    expect(
+      screen.queryByRole('button', { name: /Modo apresentação/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Configurações/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Segurança e sessão/i }));
+    fireEvent.click(await screen.findByRole('switch', { name: /Modo apresentação/i }));
     expect(
       screen.getByText(/Modo apresentação ativo — valores sensíveis ocultos/i),
     ).toBeInTheDocument();
