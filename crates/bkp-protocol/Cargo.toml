@@ -1,0 +1,10 @@
+[package]
+name = "bkp-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Protocolo de mensagens e canal cifrado Noise entre extensão e aplicativo"
+
+[lints]
+workspace = true

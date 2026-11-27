@@ -1,0 +1,10 @@
+[package]
+name = "bkp-passkey"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Autenticador WebAuthn e constantes de formato passkey compatíveis com KeePassXC"
+
+[lints]
+workspace = true

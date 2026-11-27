@@ -1,0 +1,10 @@
+[package]
+name = "bkp-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native Messaging host que conecta a extensão do navegador ao BetterKeePass"
+
+[lints]
+workspace = true

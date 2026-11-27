@@ -1,0 +1,19 @@
+name: Fuzz Nightly
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run kdbx_open fuzzer
+        working-directory: fuzz
+        run: cargo +nightly fuzz run kdbx_open -- -max_total_time=120

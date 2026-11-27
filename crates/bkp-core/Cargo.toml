@@ -1,0 +1,18 @@
+[package]
+name = "bkp-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Núcleo do BetterKeePass: leitura/escrita KDBX, modelos, gerador e TOTP"
+
+[dependencies]
+getrandom.workspace = true
+keepass.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

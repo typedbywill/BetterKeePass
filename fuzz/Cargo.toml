@@ -1,0 +1,20 @@
+[package]
+name = "bkp-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bkp-core = { path = "../crates/bkp-core" }
+libfuzzer-sys = "0.4"
+secrecy = "0.10.3"
+
+[[bin]]
+name = "kdbx_open"
+path = "fuzz_targets/kdbx_open.rs"
+test = false
+doc = false
+bench = false

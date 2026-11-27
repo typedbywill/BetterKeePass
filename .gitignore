@@ -1,0 +1,9 @@
+/target/
+/node_modules/
+/result
+/result-*
+/.direnv/
+/dist/
+*.kdbx
+!crates/bkp-core/tests/fixtures/*.kdbx
+.DS_Store

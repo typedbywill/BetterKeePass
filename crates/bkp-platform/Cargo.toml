@@ -1,0 +1,10 @@
+[package]
+name = "bkp-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Abstrações de integração por sistema operacional (AutoType, QuickUnlock, SecretService, SshAgent)"
+
+[lints]
+workspace = true
