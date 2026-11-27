@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownAZ,
   Clock,
@@ -69,12 +70,18 @@ const EntryRow = memo(function EntryRow({
   const setDraggingEntryId = useUiStore((s) => s.setDraggingEntryId);
   const setDeleteConfirmId = useUiStore((s) => s.setDeleteConfirmId);
   const pushToast = useUiStore((s) => s.pushToast);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
-  async function handleQuickCopy(uuid: string, field: 'password' | 'username') {
+  async function handleQuickCopy(uuid: string, field: 'password' | 'username' | 'totp') {
     await api.copySecret(uuid, field);
     pushToast({
       kind: 'clipboard',
-      title: field === 'password' ? t.copiedPasswordToast : t.copiedUsernameToast,
+      title:
+        field === 'password'
+          ? t.copiedPasswordToast
+          : field === 'username'
+            ? t.copiedUsernameToast
+            : t.copiedTotpToast,
       clearAfterSeconds: clipboardClearSeconds,
     });
   }
@@ -107,6 +114,14 @@ const EntryRow = memo(function EntryRow({
     <li className="group relative shrink-0 [content-visibility:auto] [contain-intrinsic-size:auto_50px]">
       <div
         draggable
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setSelectedEntryId(entry.uuid);
+          setContextMenu({
+            x: Math.min(e.clientX, window.innerWidth - 208),
+            y: Math.min(e.clientY, window.innerHeight - 180),
+          });
+        }}
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', entry.uuid);
           e.dataTransfer.effectAllowed = 'move';
@@ -234,6 +249,107 @@ const EntryRow = memo(function EntryRow({
           </Menu>
         </div>
       </div>
+      {contextMenu &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50"
+            onMouseDown={() => setContextMenu(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setContextMenu(null);
+            }}
+          >
+            <div
+              role="menu"
+              aria-label={`${entry.title} context menu`}
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              className="fixed min-w-48 rounded-lg border border-border-strong bg-surface p-1 shadow-xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                autoFocus
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-fg hover:bg-surface-hover focus:bg-surface-hover outline-none cursor-pointer"
+                onClick={() => {
+                  setContextMenu(null);
+                  void handleQuickCopy(entry.uuid, 'password');
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <Copy className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                  {t.copyPassword}
+                </span>
+                <span className="text-[10px] font-mono text-fg-subtle">Ctrl+C</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-fg hover:bg-surface-hover focus:bg-surface-hover outline-none cursor-pointer"
+                onClick={() => {
+                  setContextMenu(null);
+                  void handleQuickCopy(entry.uuid, 'username');
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <User className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                  {t.copyUsername}
+                </span>
+                <span className="text-[10px] font-mono text-fg-subtle">Ctrl+B</span>
+              </button>
+              {hasTotp && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-fg hover:bg-surface-hover focus:bg-surface-hover outline-none cursor-pointer"
+                  onClick={() => {
+                    setContextMenu(null);
+                    void handleQuickCopy(entry.uuid, 'totp');
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                    {t.copyTotp}
+                  </span>
+                  <span className="text-[10px] font-mono text-fg-subtle">Ctrl+T</span>
+                </button>
+              )}
+              {entry.url && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-fg hover:bg-surface-hover focus:bg-surface-hover outline-none cursor-pointer"
+                  onClick={() => {
+                    setContextMenu(null);
+                    window.open(entry.url, '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <ExternalLink className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                    {t.openUrl}
+                  </span>
+                  <span className="text-[10px] font-mono text-fg-subtle">Ctrl+O</span>
+                </button>
+              )}
+              <div className="my-1 h-px bg-border" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-danger hover:bg-danger-subtle focus:bg-danger-subtle outline-none cursor-pointer"
+                onClick={() => {
+                  setContextMenu(null);
+                  setDeleteConfirmId(entry.uuid);
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.deleteEntry}
+                </span>
+                <span className="text-[10px] font-mono opacity-75">Del</span>
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </li>
   );
 });

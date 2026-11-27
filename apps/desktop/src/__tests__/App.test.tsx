@@ -456,4 +456,22 @@ describe('BetterKeePass Desktop UI', () => {
 
     spy.mockRestore();
   });
+
+  it('opens a context menu on right-click in the entry list', async () => {
+    const copySpy = vi.spyOn(api, 'copySecret');
+    renderApp();
+    await unlockDemoVault();
+
+    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const githubRow = within(entryList).getByText('GitHub');
+    fireEvent.contextMenu(githubRow, { clientX: 120, clientY: 160 });
+
+    const menu = await screen.findByRole('menu', { name: /GitHub context menu/i });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Copiar senha/i }));
+
+    await waitFor(() => {
+      expect(copySpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'password');
+    });
+    copySpy.mockRestore();
+  });
 });
