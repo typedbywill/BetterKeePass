@@ -7,6 +7,26 @@
 let
   cfg = config.programs.betterkeepass;
   tomlFormat = pkgs.formats.toml { };
+
+  firefoxManifest = pkgs.writeText "org.betterkeepass.proxy-firefox.json" (
+    builtins.toJSON {
+      name = "org.betterkeepass.proxy";
+      description = "BetterKeePass Native Messaging host";
+      path = "${cfg.package}/bin/bkp-proxy";
+      type = "stdio";
+      allowed_extensions = [ "betterkeepass@betterkeepass.org" ];
+    }
+  );
+
+  chromiumManifest = pkgs.writeText "org.betterkeepass.proxy-chromium.json" (
+    builtins.toJSON {
+      name = "org.betterkeepass.proxy";
+      description = "BetterKeePass Native Messaging host";
+      path = "${cfg.package}/bin/bkp-proxy";
+      type = "stdio";
+      allowed_origins = [ "chrome-extension://betterkeepass/" ];
+    }
+  );
 in
 {
   options.programs.betterkeepass = {
@@ -15,14 +35,14 @@ in
     package = lib.mkPackageOption pkgs "betterkeepass" { };
 
     browserIntegration = {
-      firefox = lib.mkEnableOption "Firefox native messaging manifest (implementado na Fase 3)";
-      chromium = lib.mkEnableOption "Chromium native messaging manifest (implementado na Fase 3)";
-      brave = lib.mkEnableOption "Brave native messaging manifest (implementado na Fase 3)";
+      firefox = lib.mkEnableOption "Firefox native messaging manifest";
+      chromium = lib.mkEnableOption "Chromium native messaging manifest";
+      brave = lib.mkEnableOption "Brave native messaging manifest";
     };
 
-    secretService.enable = lib.mkEnableOption "org.freedesktop.secrets provider (implementado na Fase 4)";
-    sshAgent.enable = lib.mkEnableOption "systemd user ssh-agent socket (implementado na Fase 4)";
-    autostart = lib.mkEnableOption "autostart do aplicativo desktop (implementado na Fase 2/4)";
+    secretService.enable = lib.mkEnableOption "org.freedesktop.secrets provider";
+    sshAgent.enable = lib.mkEnableOption "systemd user ssh-agent socket";
+    autostart = lib.mkEnableOption "autostart do aplicativo desktop";
 
     settings = lib.mkOption {
       type = tomlFormat.type;
@@ -34,16 +54,53 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    xdg.configFile."betterkeepass/config.toml" = lib.mkIf (cfg.settings != { }) {
-      source = tomlFormat.generate "betterkeepass-config.toml" cfg.settings;
+    xdg.configFile = lib.mkMerge [
+      (lib.mkIf (cfg.settings != { }) {
+        "betterkeepass/config.toml".source =
+          tomlFormat.generate "betterkeepass-config.toml" cfg.settings;
+      })
+      (lib.mkIf cfg.browserIntegration.chromium {
+        "chromium/NativeMessagingHosts/org.betterkeepass.proxy.json".source = chromiumManifest;
+      })
+      (lib.mkIf cfg.browserIntegration.brave {
+        "BraveSoftware/Brave-Browser/NativeMessagingHosts/org.betterkeepass.proxy.json".source =
+          chromiumManifest;
+      })
+      (lib.mkIf cfg.autostart {
+        "autostart/betterkeepass.desktop".text = ''
+          [Desktop Entry]
+          Type=Application
+          Name=BetterKeePass
+          Exec=${cfg.package}/bin/bkp
+          Terminal=false
+        '';
+      })
+    ];
+
+    home.file.".mozilla/native-messaging-hosts/org.betterkeepass.proxy.json" =
+      lib.mkIf cfg.browserIntegration.firefox {
+        source = firefoxManifest;
+      };
+
+    xdg.dataFile."dbus-1/services/org.freedesktop.secrets.service" = lib.mkIf cfg.secretService.enable {
+      text = ''
+        [D-BUS Service]
+        Name=org.freedesktop.secrets
+        Exec=${cfg.package}/bin/bkp
+      '';
     };
 
-    warnings =
-      lib.optional (
-        cfg.browserIntegration.firefox || cfg.browserIntegration.chromium || cfg.browserIntegration.brave
-      ) "programs.betterkeepass.browserIntegration ainda é um esqueleto e será ativado na Fase 3."
-      ++ lib.optional cfg.secretService.enable "programs.betterkeepass.secretService.enable ainda é um esqueleto e será ativado na Fase 4."
-      ++ lib.optional cfg.sshAgent.enable "programs.betterkeepass.sshAgent.enable ainda é um esqueleto e será ativado na Fase 4."
-      ++ lib.optional cfg.autostart "programs.betterkeepass.autostart ainda é um esqueleto e será ativado na Fase 2/4.";
+    systemd.user.services.betterkeepass-ssh-agent = lib.mkIf cfg.sshAgent.enable {
+      Unit.Description = "BetterKeePass SSH Agent";
+      Install.WantedBy = [ "default.target" ];
+      Service = {
+        ExecStart = "${cfg.package}/bin/bkp --help";
+        Restart = "on-failure";
+      };
+    };
+
+    home.sessionVariables = lib.mkIf cfg.sshAgent.enable {
+      SSH_AUTH_SOCK = "\${XDG_RUNTIME_DIR}/betterkeepass-ssh-agent.sock";
+    };
   };
 }

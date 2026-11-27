@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BetterKeePass</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <h1>BetterKeePass</h1>
+        <span id="status-badge" class="badge">Verificando...</span>
+      </header>
+      <p id="origin-label" class="muted"></p>
+      <div class="actions">
+        <button id="refresh-btn" type="button">Atualizar</button>
+      </div>
+      <ul id="candidates" class="list"></ul>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

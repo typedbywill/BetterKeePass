@@ -4,7 +4,18 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Abstrações de integração por sistema operacional (AutoType, QuickUnlock, SecretService, SshAgent)"
+description = "Integrações de plataforma: Clipboard, AutoType, SSH Agent, Secret Service, QuickUnlock e YubiKey"
+
+[dependencies]
+arboard.workspace = true
+bkp-core.workspace = true
+ed25519-dalek.workspace = true
+pkcs8.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

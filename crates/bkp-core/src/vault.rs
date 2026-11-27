@@ -8,9 +8,11 @@ use std::{
 
 use keepass::{
     Database, DatabaseKey,
-    db::{EntryId, EntryRef, GroupId, GroupRef, Value, fields},
+    config::DatabaseConfig,
+    db::{EntryId, EntryRef, GroupId, GroupRef, Times, Value, fields},
 };
 use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -18,8 +20,11 @@ use crate::{
     totp::OtpCode,
 };
 
+const RECYCLE_BIN_NAME: &str = "Recycle Bin";
+
 /// Metadados públicos de uma entrada (não contém senha, seed TOTP nem chaves privadas).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntrySummary {
     /// Identificador único da entrada.
     pub uuid: Uuid,
@@ -35,8 +40,41 @@ pub struct EntrySummary {
     pub group_path: String,
 }
 
+/// Nó da árvore de grupos para exibição em UI e CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupNode {
+    /// UUID do grupo.
+    pub uuid: Uuid,
+    /// Nome do grupo.
+    pub name: String,
+    /// Caminho completo separado por `/` (vazio na raiz).
+    pub path: String,
+    /// Quantidade de entradas diretas neste grupo.
+    pub entry_count: usize,
+    /// Indica se este grupo é a lixeira configurada.
+    pub is_recycle_bin: bool,
+    /// Subgrupos filhos.
+    pub children: Vec<Self>,
+}
+
+/// Resumo de uma revisão no histórico de uma entrada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntrySummary {
+    /// Índice da revisão no histórico (`0` é a mais recente).
+    pub index: usize,
+    /// Título nessa revisão.
+    pub title: String,
+    /// Usuário nessa revisão.
+    pub username: String,
+    /// Timestamp da última modificação (ISO-8601 UTC), se disponível.
+    pub last_modified: Option<String>,
+}
+
 /// Visualização de um campo customizado da entrada.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomFieldView {
     /// Nome do campo.
     pub name: String,
@@ -114,7 +152,7 @@ pub struct EntryPatch {
 
 /// Cofre KeePass aberto em memória.
 pub struct Vault {
-    db: Database,
+    pub(crate) db: Database,
 }
 
 impl Vault {
@@ -137,8 +175,7 @@ impl Vault {
     ) -> Result<Self> {
         let bytes = fs::read(path)?;
         let keyfile_bytes = keyfile.map(fs::read).transpose()?;
-        let vault = Self::open_from_bytes(&bytes, password, keyfile_bytes.as_deref())?;
-        Ok(vault)
+        Self::open_from_bytes(&bytes, password, keyfile_bytes.as_deref())
     }
 
     /// Abre um cofre `.kdbx` diretamente a partir de bytes em memória (útil para testes e fuzzing).
@@ -195,10 +232,50 @@ impl Vault {
         write_result
     }
 
+    /// Atualiza a versão de formato do cofre em memória para KDBX 4 (migração a partir de KDBX 3.1).
+    pub fn upgrade_to_kdbx4(&mut self) {
+        self.db.config.version = DatabaseConfig::default().version;
+    }
+
     /// Retorna o nome configurado nos metadados do banco, se houver.
     #[must_use]
     pub fn database_name(&self) -> Option<&str> {
         self.db.meta.database_name.as_deref()
+    }
+
+    /// Retorna a árvore completa de grupos do cofre.
+    #[must_use]
+    pub fn group_tree(&self) -> GroupNode {
+        let root = self.db.root();
+        build_group_node(&root, "", self.db.meta.recyclebin_uuid)
+    }
+
+    /// Cria um grupo (e subgrupos intermediários ausentes) no caminho informado.
+    pub fn create_group(&mut self, group_path: &str) -> Result<Uuid> {
+        let segments = normalize_group_segments(Some(group_path));
+        if segments.is_empty() {
+            return Err(CoreError::InvalidInput(
+                "o caminho do grupo não pode ser vazio".to_owned(),
+            ));
+        }
+        Ok(self.ensure_group_path(Some(group_path)).uuid())
+    }
+
+    /// Remove um grupo (exceto a raiz) e todo o seu conteúdo.
+    pub fn delete_group(&mut self, group_path: &str) -> Result<()> {
+        let segments = normalize_group_segments(Some(group_path));
+        if segments.is_empty() {
+            return Err(CoreError::InvalidInput(
+                "não é possível remover o grupo raiz".to_owned(),
+            ));
+        }
+        let group_id = self.resolve_group_id(&segments)?;
+        let group = self
+            .db
+            .group_mut(group_id)
+            .ok_or_else(|| CoreError::GroupNotFound(segments.join("/")))?;
+        group.remove();
+        Ok(())
     }
 
     /// Lista os nomes dos subgrupos diretos de `group_path` (ou da raiz quando `None`).
@@ -333,6 +410,15 @@ impl Vault {
         Ok(SecretString::from(password))
     }
 
+    /// Retorna o valor de um campo específico (protegido ou não) de uma entrada.
+    pub fn entry_field_secret(&self, uuid: Uuid, field: &str) -> Result<Option<SecretString>> {
+        let entry = self
+            .db
+            .entry(EntryId::from_uuid(uuid))
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        Ok(entry.get(field).map(|v| SecretString::from(v.to_owned())))
+    }
+
     /// Adiciona uma entrada em `group_path` (criando subgrupos inexistentes quando necessário).
     pub fn add_entry(&mut self, group_path: Option<&str>, new_entry: NewEntry) -> Result<Uuid> {
         if new_entry.title.trim().is_empty() {
@@ -411,6 +497,153 @@ impl Vault {
         Ok(())
     }
 
+    /// Move uma entrada para a lixeira (`permanent = false`) ou exclui definitivamente (`permanent = true`).
+    pub fn delete_entry(&mut self, uuid: Uuid, permanent: bool) -> Result<()> {
+        let entry_id = EntryId::from_uuid(uuid);
+        if self.db.entry(entry_id).is_none() {
+            return Err(CoreError::EntryNotFound(uuid.to_string()));
+        }
+
+        if permanent {
+            if let Some(entry) = self.db.entry_mut(entry_id) {
+                entry.remove();
+            }
+            return Ok(());
+        }
+
+        let recycle_bin_id = self.ensure_recycle_bin();
+        if let Some(entry) = self.db.entry(entry_id)
+            && entry.parent().id() == recycle_bin_id
+        {
+            if let Some(entry_mut) = self.db.entry_mut(entry_id) {
+                entry_mut.remove();
+            }
+            return Ok(());
+        }
+
+        if let Some(mut entry_mut) = self.db.entry_mut(entry_id) {
+            entry_mut
+                .move_to(recycle_bin_id)
+                .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+            entry_mut.times.location_changed = Some(Times::now());
+        }
+        Ok(())
+    }
+
+    /// Esvazia todas as entradas da lixeira e retorna quantas foram removidas.
+    pub fn empty_recycle_bin(&mut self) -> usize {
+        let Some(recycle_id) = self.db.meta.recyclebin_uuid.map(GroupId::from_uuid) else {
+            return 0;
+        };
+        let entry_ids: Vec<EntryId> = self
+            .db
+            .group(recycle_id)
+            .map(|g| g.entries().map(|e| e.id()).collect())
+            .unwrap_or_default();
+        let count = entry_ids.len();
+        for id in entry_ids {
+            if let Some(entry) = self.db.entry_mut(id) {
+                entry.remove();
+            }
+        }
+        count
+    }
+
+    /// Lista as versões armazenadas no histórico de uma entrada.
+    pub fn entry_history(&self, uuid: Uuid) -> Result<Vec<HistoryEntrySummary>> {
+        let entry = self
+            .db
+            .entry(EntryId::from_uuid(uuid))
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+
+        let Some(history) = &entry.history else {
+            return Ok(Vec::new());
+        };
+
+        Ok(history
+            .get_entries()
+            .iter()
+            .enumerate()
+            .map(|(index, item)| HistoryEntrySummary {
+                index,
+                title: item.get_title().unwrap_or_default().to_owned(),
+                username: item.get_username().unwrap_or_default().to_owned(),
+                last_modified: item
+                    .times
+                    .last_modification
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            })
+            .collect())
+    }
+
+    /// Restaura uma entrada a partir de um índice do seu histórico (gravando o estado atual no histórico).
+    pub fn restore_history(&mut self, uuid: Uuid, index: usize) -> Result<()> {
+        let entry_id = EntryId::from_uuid(uuid);
+        let snapshot = {
+            let entry = self
+                .db
+                .entry(entry_id)
+                .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+            let history = entry
+                .history
+                .as_ref()
+                .ok_or(CoreError::HistoryNotFound(index))?;
+            history
+                .get_entries()
+                .get(index)
+                .cloned()
+                .ok_or(CoreError::HistoryNotFound(index))?
+        };
+
+        let mut entry_mut = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        entry_mut.edit_tracking(|tracked| {
+            tracked.fields = snapshot.fields;
+            tracked.tags = snapshot.tags;
+            tracked.override_url = snapshot.override_url;
+        });
+        Ok(())
+    }
+
+    /// Anexa um arquivo binário protegido a uma entrada.
+    pub fn add_attachment(&mut self, uuid: Uuid, name: &str, data: Vec<u8>) -> Result<()> {
+        if name.trim().is_empty() {
+            return Err(CoreError::InvalidInput(
+                "o nome do anexo não pode ser vazio".to_owned(),
+            ));
+        }
+        let mut entry = self
+            .db
+            .entry_mut(EntryId::from_uuid(uuid))
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        entry.add_attachment(name, Value::protected(data));
+        Ok(())
+    }
+
+    /// Lê os bytes de um anexo pelo nome.
+    pub fn get_attachment(&self, uuid: Uuid, name: &str) -> Result<Vec<u8>> {
+        let entry = self
+            .db
+            .entry(EntryId::from_uuid(uuid))
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        let attachment = entry
+            .attachment_by_name(name)
+            .ok_or_else(|| CoreError::AttachmentNotFound(name.to_owned()))?;
+        Ok(attachment.data.get().clone())
+    }
+
+    /// Remove um anexo pelo nome.
+    pub fn remove_attachment(&mut self, uuid: Uuid, name: &str) -> Result<()> {
+        let mut entry = self
+            .db
+            .entry_mut(EntryId::from_uuid(uuid))
+            .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
+        entry.remove_attachment_by_name(name);
+        Ok(())
+    }
+
     /// Calcula o código TOTP atual de uma entrada com campo `otp`.
     pub fn totp_now(&self, uuid: Uuid) -> Result<OtpCode> {
         let entry = self
@@ -418,6 +651,52 @@ impl Vault {
             .entry(EntryId::from_uuid(uuid))
             .ok_or_else(|| CoreError::EntryNotFound(uuid.to_string()))?;
         crate::totp::totp_from_entry(&entry)
+    }
+
+    pub(crate) fn raw_entry(&self, uuid: Uuid) -> Option<EntryRef<'_>> {
+        self.db.entry(EntryId::from_uuid(uuid))
+    }
+
+    pub(crate) fn ensure_group_path(&mut self, group_path: Option<&str>) -> GroupId {
+        let segments = normalize_group_segments(group_path);
+        let mut current_id = self.db.root().id();
+
+        for segment in segments {
+            let next_id = {
+                let Some(mut current) = self.db.group_mut(current_id) else {
+                    break;
+                };
+                if let Some(existing) = current.group_by_name_mut(segment) {
+                    existing.id()
+                } else {
+                    let mut created = current.add_group();
+                    segment.clone_into(&mut created.name);
+                    created.id()
+                }
+            };
+            current_id = next_id;
+        }
+
+        current_id
+    }
+
+    fn ensure_recycle_bin(&mut self) -> GroupId {
+        if let Some(existing) = self.db.recycle_bin() {
+            return existing.id();
+        }
+        let id = {
+            let mut root = self.db.root_mut();
+            if let Some(existing) = root.group_by_name_mut(RECYCLE_BIN_NAME) {
+                existing.id()
+            } else {
+                let mut created = root.add_group();
+                RECYCLE_BIN_NAME.clone_into(&mut created.name);
+                created.id()
+            }
+        };
+        self.db.meta.recyclebin_enabled = Some(true);
+        self.db.meta.recyclebin_uuid = Some(id.uuid());
+        id
     }
 
     fn resolve_group(&self, group_path: Option<&str>) -> Result<GroupRef<'_>> {
@@ -441,29 +720,6 @@ impl Vault {
                 .ok_or_else(|| CoreError::GroupNotFound(segments.join("/")))?;
         }
         Ok(current_id)
-    }
-
-    fn ensure_group_path(&mut self, group_path: Option<&str>) -> GroupId {
-        let segments = normalize_group_segments(group_path);
-        let mut current_id = self.db.root().id();
-
-        for segment in segments {
-            let next_id = {
-                let Some(mut current) = self.db.group_mut(current_id) else {
-                    break;
-                };
-                if let Some(existing) = current.group_by_name_mut(segment) {
-                    existing.id()
-                } else {
-                    let mut created = current.add_group();
-                    segment.clone_into(&mut created.name);
-                    created.id()
-                }
-            };
-            current_id = next_id;
-        }
-
-        current_id
     }
 }
 
@@ -494,7 +750,7 @@ fn normalize_group_segments(group_path: Option<&str>) -> Vec<&str> {
         .collect()
 }
 
-fn group_path_of(db: &Database, group_id: GroupId) -> String {
+pub(crate) fn group_path_of(db: &Database, group_id: GroupId) -> String {
     let mut parts = Vec::new();
     let mut current = Some(group_id);
     while let Some(id) = current {
@@ -509,6 +765,34 @@ fn group_path_of(db: &Database, group_id: GroupId) -> String {
     }
     parts.reverse();
     parts.join("/")
+}
+
+fn build_group_node(
+    group: &GroupRef<'_>,
+    parent_path: &str,
+    recycle_uuid: Option<Uuid>,
+) -> GroupNode {
+    let path = if group.parent().is_none() {
+        String::new()
+    } else if parent_path.is_empty() {
+        group.name.clone()
+    } else {
+        format!("{parent_path}/{}", group.name)
+    };
+
+    let children = group
+        .groups()
+        .map(|child| build_group_node(&child, &path, recycle_uuid))
+        .collect();
+
+    GroupNode {
+        uuid: group.id().uuid(),
+        name: group.name.clone(),
+        path,
+        entry_count: group.entries().count(),
+        is_recycle_bin: recycle_uuid == Some(group.id().uuid()),
+        children,
+    }
 }
 
 fn summarize_entry(entry: &EntryRef<'_>, group_path: &str) -> EntrySummary {

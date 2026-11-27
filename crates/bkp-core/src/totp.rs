@@ -3,11 +3,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use keepass::db::{Entry, TOTP};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 
 /// Código TOTP gerado com sua janela de validade.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OtpCode {
     /// Código numérico formatado (com zeros à esquerda).
     pub code: String,

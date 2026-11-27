@@ -29,7 +29,7 @@ let
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoExtraArgs = "-p bkp-cli";
+      cargoExtraArgs = "-p bkp-cli -p bkp-proxy";
       doCheck = false;
       meta = {
         description = "Gerenciador de senhas compatível com KDBX, passkeys WebAuthn e integração NixOS";
@@ -53,8 +53,13 @@ let
         export HOME="$TMPDIR"
         export BKP_PASSWORD="interop-secret"
 
+        test -x ${package}/bin/bkp-proxy
+
         bkp db-create bkp.kdbx --name InteropTest
         bkp add bkp.kdbx "Contas/Email" --username "alice@example.org" --generate
+        bkp search bkp.kdbx "group:Contas alice" | grep -q "Contas/Email"
+        bkp health bkp.kdbx | grep -q "Total: 1"
+        test "$(bkp passphrase --words 4 | tr '-' '\n' | wc -l)" -eq 4
 
         printf 'interop-secret\n' | keepassxc-cli show -s bkp.kdbx "Contas/Email" > from_bkp.txt
         grep -q "UserName: alice@example.org" from_bkp.txt

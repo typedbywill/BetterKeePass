@@ -34,6 +34,13 @@
           default = built.package;
           betterkeepass = built.package;
         }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          nixos-test = import ./nix/tests/nixos-module-test.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+            package = built.package;
+          };
+        }
       );
 
       apps = forAllSystems (pkgs: {
@@ -62,7 +69,7 @@
         pkgs:
         let
           craneLib = crane.mkLib pkgs;
-          tauriLinuxDeps = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+          tauriLinuxDeps = pkgs.lib.optionals pkgs.stdenv.isLinux (
             with pkgs;
             [
               webkitgtk_4_1

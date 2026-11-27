@@ -4,7 +4,22 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Autenticador WebAuthn e constantes de formato passkey compatíveis com KeePassXC"
+description = "Autenticador WebAuthn completo e provedores nativos do SO para passkeys no formato KeePassXC"
+
+[dependencies]
+base64.workspace = true
+bkp-core.workspace = true
+ciborium.workspace = true
+coset.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+p256.workspace = true
+pkcs8.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

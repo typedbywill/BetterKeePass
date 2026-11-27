@@ -1,9 +1,13 @@
 /target/
-/node_modules/
+/apps/desktop/src-tauri/target/
+node_modules/
 /result
 /result-*
 /.direnv/
 /dist/
+/apps/desktop/dist/
+/extension/.output/
+/extension/.wxt/
 *.kdbx
 !crates/bkp-core/tests/fixtures/*.kdbx
 .DS_Store

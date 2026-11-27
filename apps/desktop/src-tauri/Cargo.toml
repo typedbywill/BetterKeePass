@@ -1,0 +1,24 @@
+[package]
+name = "betterkeepass-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "GPL-3.0-or-later"
+description = "Aplicativo desktop Tauri v2 do BetterKeePass"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+bkp-core = { path = "../../../crates/bkp-core" }
+bkp-passkey = { path = "../../../crates/bkp-passkey" }
+bkp-platform = { path = "../../../crates/bkp-platform" }
+bkp-protocol = { path = "../../../crates/bkp-protocol" }
+secrecy = "0.10.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+uuid = { version = "1.18", features = ["v4", "serde"] }
+
+[lints.rust]
+unsafe_code = "forbid"

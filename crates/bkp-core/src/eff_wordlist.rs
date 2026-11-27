@@ -1,0 +1,31 @@
+//! Wordlist curada no estilo EFF para geração de passphrases memoráveis.
+
+/// Lista de 256 palavras distintas, fáceis de digitar e sem caracteres ambíguos.
+pub const WORDS: &[&str] = &[
+    "abaco", "abril", "acaso", "acero", "acido", "acorde", "adaga", "adubo", "afago", "afeto",
+    "agil", "agora", "aguia", "alado", "alce", "aldeia", "alegre", "alerta", "alface", "algema",
+    "alicate", "alma", "alpino", "altar", "alvo", "amado", "ambar", "amendoa", "amigo", "amora",
+    "amplo", "ancora", "andar", "anel", "anexo", "anjo", "antena", "anual", "anzol", "apice",
+    "apito", "apoio", "arado", "arame", "aranha", "arara", "arcada", "arco", "arena", "aresta",
+    "argila", "aroma", "arroz", "arte", "arvore", "asfalto", "astro", "atalho", "atento", "atlas",
+    "atomo", "audio", "aurora", "autor", "avanco", "aveia", "avenida", "aviao", "aviso", "azulejo",
+    "bagagem", "bainha", "bairro", "baixo", "balanco", "balde", "baleia", "bambu", "banco",
+    "banda", "banho", "barco", "barra", "barro", "basal", "basto", "batata", "batida", "bauru",
+    "beira", "beijo", "belo", "berco", "bicho", "bigode", "bilhete", "bioma", "bispo", "bloco",
+    "blusa", "boato", "bobina", "boca", "bodega", "boia", "boina", "bolacha", "bolha", "bolso",
+    "bomba", "bonde", "boneco", "borda", "bosque", "botao", "botina", "braco", "brasa", "bravo",
+    "brecha", "briga", "brilho", "brinde", "brisa", "broca", "broto", "bruxa", "bucha", "bufalo",
+    "bule", "buraco", "bussola", "cabana", "cabeca", "cabide", "cabo", "cabra", "cacau", "cacho",
+    "cadeia", "caderno", "cafe", "caixa", "cajado", "calca", "calda", "calma", "calor", "cama",
+    "camara", "camelo", "camisa", "campo", "canal", "caneca", "canela", "caneta", "canguru",
+    "canhao", "canoa", "canto", "capa", "capaz", "capela", "capim", "capitao", "capote", "capsula",
+    "caracol", "carimbo", "carne", "caro", "carpa", "carro", "carta", "casaco", "casca", "casulo",
+    "catraca", "cauda", "caule", "causa", "cavalo", "caverna", "cebola", "cedro", "ceifa", "cela",
+    "celeiro", "celula", "cenoura", "centro", "cera", "cerca", "cereal", "cereja", "cerne",
+    "certo", "cervo", "cesta", "cetim", "chacara", "chale", "chama", "chao", "chapa", "chapeu",
+    "charme", "chave", "chefe", "cheiro", "cheque", "chiclete", "chifre", "chinelo", "chita",
+    "choque", "chumbo", "chute", "chuva", "ciclo", "cidra", "cifra", "cigarra", "cilada", "cima",
+    "cimento", "cinco", "cinema", "cinto", "cinza", "circo", "cirurgia", "cisne", "cidade",
+    "clarim", "claro", "classe", "clave", "clima", "clube", "coala", "cobra", "cobre", "coelho",
+    "cofre", "cogumelo", "coisa",
+];

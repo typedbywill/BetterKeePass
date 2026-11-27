@@ -1,15 +1,18 @@
-//! Traits de integração por sistema operacional.
-//!
-//! As implementações concretas para Linux, Windows e macOS serão adicionadas na Fase 4.
+//! Integrações de plataforma do BetterKeePass (Clipboard seguro, Auto-Type, SSH Agent,
+//! Secret Service D-Bus, Quick Unlock, YubiKey e hardening de processo).
 
-/// Execução de sequências de digitação automática (Auto-Type).
-pub trait AutoType {}
+pub mod autotype;
+pub mod clipboard;
+pub mod hardening;
+pub mod quick_unlock;
+pub mod secret_service;
+pub mod ssh_agent;
+pub mod yubikey;
 
-/// Desbloqueio rápido via biometria, TPM ou provedor nativo do SO.
-pub trait QuickUnlock {}
-
-/// Provedor D-Bus Secret Service (`org.freedesktop.secrets`) no Linux.
-pub trait SecretService {}
-
-/// Integração com agente SSH (`ssh-agent` / Pageant / OpenSSH).
-pub trait SshAgent {}
+pub use autotype::{AutoType, AutoTypeAction, NoopAutoType, parse_autotype_sequence};
+pub use clipboard::ClipboardManager;
+pub use hardening::{HardeningStatus, current_hardening_status};
+pub use quick_unlock::{QuickUnlock, QuickUnlockBackend, detect_quick_unlock_backend};
+pub use secret_service::{SecretService, SecretServiceCollection, SecretServiceItem};
+pub use ssh_agent::{SshAgent, SshKeyEntry, parse_ed25519_openssh_or_pem, run_ssh_agent_once};
+pub use yubikey::{ChallengeResponseProvider, YubiKeySlotConfig};

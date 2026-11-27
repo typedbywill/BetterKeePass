@@ -8,7 +8,7 @@ members = [
     "crates/bkp-platform",
     "crates/bkp-proxy",
 ]
-exclude = ["fuzz"]
+exclude = ["fuzz", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -20,14 +20,32 @@ authors = ["BetterKeePass Contributors"]
 
 [workspace.dependencies]
 anyhow = "1"
+arboard = "3"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+ciborium = "0.2"
 clap = { version = "4", features = ["derive"] }
+coset = "0.4"
+csv = "1.4"
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
 getrandom = { version = "0.4", features = ["std"] }
 keepass = { version = "0.17", features = ["save_kdbx4", "totp"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 rpassword = "7"
 secrecy = "0.10.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+snow = "0.10"
 thiserror = "2"
-uuid = { version = "1.18", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+uuid = { version = "1.18", features = ["v4", "serde"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
+zxcvbn = "3.1"
 
 bkp-core = { path = "crates/bkp-core", version = "0.1.0" }
 bkp-passkey = { path = "crates/bkp-passkey", version = "0.1.0" }

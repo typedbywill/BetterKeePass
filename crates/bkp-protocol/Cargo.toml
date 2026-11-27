@@ -6,5 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 description = "Protocolo de mensagens e canal cifrado Noise entre extensão e aplicativo"
 
+[dependencies]
+base64.workspace = true
+bkp-passkey.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+snow.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
 [lints]
 workspace = true

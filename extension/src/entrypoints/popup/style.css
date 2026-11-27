@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 300px;
+  padding: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #334155;
+}
+
+.badge[data-state='ok'] {
+  background: #15803d;
+}
+
+.badge[data-state='err'] {
+  background: #b91c1c;
+}
+
+.muted {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.actions {
+  margin: 8px 0;
+}
+
+button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: inherit;
+  cursor: pointer;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.list li {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #1e293b;
+  font-size: 13px;
+}

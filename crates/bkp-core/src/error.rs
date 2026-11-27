@@ -28,6 +28,18 @@ pub enum CoreError {
     #[error("falha ao obter entropia do sistema: {0}")]
     Random(#[from] getrandom::Error),
 
+    /// Erro de parsing CSV.
+    #[error("erro de CSV: {0}")]
+    Csv(#[from] csv::Error),
+
+    /// Erro de parsing JSON.
+    #[error("erro de JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// Erro de parsing TOML.
+    #[error("erro de TOML: {0}")]
+    Toml(#[from] toml::de::Error),
+
     /// Nenhuma senha ou arquivo-chave foi informado.
     #[error("nenhuma credencial fornecida: informe senha e/ou arquivo-chave")]
     EmptyKey,
@@ -43,6 +55,14 @@ pub enum CoreError {
     /// Mais de uma entrada corresponde ao identificador informado.
     #[error("múltiplas entradas encontradas para '{0}'; informe o caminho completo")]
     AmbiguousEntry(String),
+
+    /// Anexo não encontrado.
+    #[error("anexo não encontrado: {0}")]
+    AttachmentNotFound(String),
+
+    /// Índice de histórico inválido.
+    #[error("versão de histórico não encontrada: {0}")]
+    HistoryNotFound(usize),
 
     /// Parâmetro ou entrada inválida.
     #[error("entrada inválida: {0}")]

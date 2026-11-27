@@ -1,10 +1,11 @@
-//! Gerador criptograficamente seguro de senhas.
-//!
-//! TODO(Fase 5): Implementar gerador de passphrases utilizando a wordlist EFF.
+//! Gerador criptograficamente seguro de senhas e passphrases.
 
 use secrecy::SecretString;
 
-use crate::error::{CoreError, Result};
+use crate::{
+    eff_wordlist,
+    error::{CoreError, Result},
+};
 
 const LOWERCASE: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const LOWERCASE_UNAMBIGUOUS: &[u8] = b"abcdefghjkmnpqrstuvwxyz";
@@ -103,7 +104,6 @@ pub fn generate_password(options: &PasswordOptions) -> Result<SecretString> {
         chars.push(alphabet[idx]);
     }
 
-    // Embaralhamento Fisher-Yates para eliminar previsibilidade de posições iniciais.
     for i in (1..chars.len()).rev() {
         let j = random_index(i + 1)?;
         chars.swap(i, j);
@@ -113,6 +113,21 @@ pub fn generate_password(options: &PasswordOptions) -> Result<SecretString> {
         CoreError::InvalidInput("falha interna ao codificar senha UTF-8".to_owned())
     })?;
     Ok(SecretString::from(password))
+}
+
+/// Gera uma passphrase aleatória usando a wordlist embutida.
+pub fn generate_passphrase(words: usize, separator: &str) -> Result<SecretString> {
+    if words == 0 {
+        return Err(CoreError::InvalidInput(
+            "a passphrase deve conter ao menos uma palavra".to_owned(),
+        ));
+    }
+    let mut chosen = Vec::with_capacity(words);
+    for _ in 0..words {
+        let idx = random_index(eff_wordlist::WORDS.len())?;
+        chosen.push(eff_wordlist::WORDS[idx]);
+    }
+    Ok(SecretString::from(chosen.join(separator)))
 }
 
 fn random_index(upper: usize) -> Result<usize> {
