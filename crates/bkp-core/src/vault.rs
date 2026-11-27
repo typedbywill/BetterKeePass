@@ -9,7 +9,7 @@ use std::{
 use keepass::{
     Database, DatabaseKey,
     config::DatabaseConfig,
-    db::{EntryId, EntryRef, GroupId, GroupRef, Times, Value, fields},
+    db::{EntryId, EntryRef, GroupId, GroupRef, Icon, Times, Value, fields},
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,12 @@ pub struct EntrySummary {
     pub tags: Vec<String>,
     /// Caminho hierárquico do grupo (vazio quando está na raiz).
     pub group_path: String,
+    /// Índice do ícone padrão KeePass, quando definido.
+    #[serde(default)]
+    pub icon_id: Option<usize>,
+    /// UUID do ícone customizado embutido no cofre, quando definido.
+    #[serde(default)]
+    pub custom_icon_uuid: Option<Uuid>,
 }
 
 /// Nó da árvore de grupos para exibição em UI e CLI.
@@ -54,6 +60,12 @@ pub struct GroupNode {
     pub entry_count: usize,
     /// Indica se este grupo é a lixeira configurada.
     pub is_recycle_bin: bool,
+    /// Índice do ícone padrão KeePass, quando definido.
+    #[serde(default)]
+    pub icon_id: Option<usize>,
+    /// UUID do ícone customizado embutido no cofre, quando definido.
+    #[serde(default)]
+    pub custom_icon_uuid: Option<Uuid>,
     /// Subgrupos filhos.
     pub children: Vec<Self>,
 }
@@ -530,6 +542,40 @@ impl Vault {
         Ok(())
     }
 
+    /// Move uma entrada para o grupo indicado por `target_group_path` (ou para a raiz quando vazio).
+    pub fn move_entry(&mut self, uuid: Uuid, target_group_path: Option<&str>) -> Result<()> {
+        let entry_id = EntryId::from_uuid(uuid);
+        if self.db.entry(entry_id).is_none() {
+            return Err(CoreError::EntryNotFound(uuid.to_string()));
+        }
+
+        let segments = normalize_group_segments(target_group_path);
+        let target_group_id = self.resolve_group_id(&segments)?;
+
+        if let Some(entry) = self.db.entry(entry_id)
+            && entry.parent().id() == target_group_id
+        {
+            return Ok(());
+        }
+
+        if let Some(mut entry_mut) = self.db.entry_mut(entry_id) {
+            entry_mut
+                .move_to(target_group_id)
+                .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+            entry_mut.times.location_changed = Some(Times::now());
+        }
+        Ok(())
+    }
+
+    /// Retorna os bytes crus de um ícone customizado armazenado no cofre.
+    #[must_use]
+    pub fn custom_icon_data(&self, uuid: Uuid) -> Option<Vec<u8>> {
+        self.db
+            .iter_all_custom_icons()
+            .find(|icon| icon.id().uuid() == uuid)
+            .map(|icon| icon.data.clone())
+    }
+
     /// Esvazia todas as entradas da lixeira e retorna quantas foram removidas.
     pub fn empty_recycle_bin(&mut self) -> usize {
         let Some(recycle_id) = self.db.meta.recyclebin_uuid.map(GroupId::from_uuid) else {
@@ -785,17 +831,30 @@ fn build_group_node(
         .map(|child| build_group_node(&child, &path, recycle_uuid))
         .collect();
 
+    let (icon_id, custom_icon_uuid) = extract_icon_meta(group.icon());
+
     GroupNode {
         uuid: group.id().uuid(),
         name: group.name.clone(),
         path,
         entry_count: group.entries().count(),
         is_recycle_bin: recycle_uuid == Some(group.id().uuid()),
+        icon_id,
+        custom_icon_uuid,
         children,
     }
 }
 
+fn extract_icon_meta(icon: Option<&Icon>) -> (Option<usize>, Option<Uuid>) {
+    match icon {
+        Some(Icon::BuiltIn(id)) => (Some(*id), None),
+        Some(Icon::Custom(cid)) => (None, Some(cid.uuid())),
+        None => (None, None),
+    }
+}
+
 fn summarize_entry(entry: &EntryRef<'_>, group_path: &str) -> EntrySummary {
+    let (icon_id, custom_icon_uuid) = extract_icon_meta(entry.icon());
     EntrySummary {
         uuid: entry.id().uuid(),
         title: entry.get_title().unwrap_or_default().to_owned(),
@@ -803,6 +862,8 @@ fn summarize_entry(entry: &EntryRef<'_>, group_path: &str) -> EntrySummary {
         url: entry.get_url().unwrap_or_default().to_owned(),
         tags: entry.tags.clone(),
         group_path: group_path.to_owned(),
+        icon_id,
+        custom_icon_uuid,
     }
 }
 

@@ -24,3 +24,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+# Mantém o binário desktop rápido para recompilar, mas otimiza Argon2/KDF/crypto das dependências.
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,33 +1,32 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
   ExternalLink,
-  Eye,
-  EyeOff,
   History,
-  KeyRound,
   MoreHorizontal,
   Paperclip,
-  Pencil,
   RotateCcw,
   ShieldCheck,
   Trash2,
-  X,
 } from 'lucide-react';
 import type { Translations } from '../i18n/pt-BR';
-import { api, type EntryDetailsView, type EntryPatchPayload, type EntrySummary } from '../lib/tauri';
+import {
+  api,
+  type EntryDetailsView,
+  type EntryPatchPayload,
+  type EntrySummary,
+} from '../lib/tauri';
 import { useUiStore } from '../store/ui';
 import {
   Avatar,
   Badge,
   Button,
   EmptyState,
-  IconButton,
   Input,
   Kbd,
   Menu,
@@ -40,12 +39,31 @@ import {
   TextArea,
 } from '../ui';
 
-type EditingField = 'title' | 'username' | 'password' | 'url' | null;
-
 function formatTotpCode(code: string): string {
   if (code.length === 6) return `${code.slice(0, 3)} ${code.slice(3)}`;
   if (code.length === 8) return `${code.slice(0, 4)} ${code.slice(4)}`;
   return code;
+}
+
+function parseTags(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function formatHistoryDate(iso: string | null, language: string): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
 }
 
 export function EntryDetail({
@@ -60,57 +78,92 @@ export function EntryDetail({
   const queryClient = useQueryClient();
   const {
     selectedEntryId,
+    setSelectedEntryId,
+    entryModalOpen,
+    setEntryModalOpen,
+    groupFilter,
+    language,
     presentationMode,
     clipboardClearSeconds,
     pushToast,
     setDeleteConfirmId,
   } = useUiStore();
 
-  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<EditingField>(null);
-  const [draftValue, setDraftValue] = useState('');
-  const [notesDraft, setNotesDraft] = useState('');
-  const [notesDirty, setNotesDirty] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
   const [totpRemaining, setTotpRemaining] = useState<number>(30);
   const [showCustomFields, setShowCustomFields] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Unified form drafts for both creation and view/edit modes
+  const [titleDraft, setTitleDraft] = useState('');
+  const [groupPathDraft, setGroupPathDraft] = useState('');
+  const [tagsDraft, setTagsDraft] = useState('');
+  const [usernameDraft, setUsernameDraft] = useState('');
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [urlDraft, setUrlDraft] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
+  const [creating, setCreating] = useState(false);
+
   const detailsQuery = useQuery({
     queryKey: ['entry-details', selectedEntryId],
     queryFn: () => api.getEntryDetails(selectedEntryId!),
-    enabled: Boolean(selectedEntryId),
+    enabled: Boolean(selectedEntryId) && !entryModalOpen,
+  });
+
+  const passwordQuery = useQuery({
+    queryKey: ['entry-password', selectedEntryId],
+    queryFn: () => api.revealPassword(selectedEntryId!),
+    enabled: Boolean(selectedEntryId) && !entryModalOpen && !presentationMode,
   });
 
   const totpQuery = useQuery({
     queryKey: ['entry-totp', selectedEntryId],
     queryFn: () => api.getTotp(selectedEntryId!),
-    enabled: Boolean(selectedEntryId && detailsQuery.data?.hasOtp && !presentationMode),
+    enabled: Boolean(selectedEntryId && !entryModalOpen && detailsQuery.data?.hasOtp && !presentationMode),
     refetchInterval: 5000,
   });
 
   const historyQuery = useQuery({
     queryKey: ['entry-history', selectedEntryId],
     queryFn: () => api.getHistory(selectedEntryId!),
-    enabled: Boolean(selectedEntryId),
+    enabled: Boolean(selectedEntryId) && !entryModalOpen,
   });
 
+  // Reset form when switching to creation mode
   useEffect(() => {
-    setRevealedPassword(null);
-    setEditingField(null);
-    setNotesDirty(false);
+    if (!entryModalOpen) return;
+    setTitleDraft('');
+    setGroupPathDraft(typeof groupFilter === 'object' ? groupFilter.groupPath : '');
+    setTagsDraft('');
+    setUsernameDraft('');
+    setPasswordDraft('');
+    setUrlDraft('');
+    setNotesDraft('');
+  }, [entryModalOpen, groupFilter]);
+
+  // Reset password draft when switching selected entry
+  useEffect(() => {
+    setPasswordDraft('');
   }, [selectedEntryId]);
 
+  // Hydrate drafts from fetched entry details
   useEffect(() => {
-    if (detailsQuery.data && !notesDirty) {
-      setNotesDraft(detailsQuery.data.notes);
-    }
-  }, [detailsQuery.data, notesDirty]);
+    if (entryModalOpen || !detailsQuery.data) return;
+    const d = detailsQuery.data;
+    setTitleDraft(d.summary.title);
+    setGroupPathDraft(d.summary.groupPath);
+    setTagsDraft(d.summary.tags.join(', '));
+    setUsernameDraft(d.summary.username);
+    setUrlDraft(d.summary.url);
+    setNotesDraft(d.notes);
+  }, [detailsQuery.data, entryModalOpen]);
 
+  // Hydrate password draft from fetched entry password
   useEffect(() => {
-    if (!revealedPassword) return;
-    const timer = setTimeout(() => setRevealedPassword(null), 10000);
-    return () => clearTimeout(timer);
-  }, [revealedPassword]);
+    if (entryModalOpen || passwordQuery.data === undefined) return;
+    setPasswordDraft(passwordQuery.data);
+  }, [passwordQuery.data, entryModalOpen]);
 
   useEffect(() => {
     if (totpQuery.data) {
@@ -133,11 +186,10 @@ export function EntryDetail({
   }, [detailsQuery.data?.hasOtp, presentationMode, totpQuery]);
 
   useEffect(() => {
-    if (editRequestNonce > 0 && detailsQuery.data) {
-      setEditingField('title');
-      setDraftValue(detailsQuery.data.summary.title);
+    if (editRequestNonce > 0) {
+      titleInputRef.current?.focus();
     }
-  }, [editRequestNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editRequestNonce]);
 
   const updateMutation = useMutation({
     mutationFn: ({ uuid, patch }: { uuid: string; patch: EntryPatchPayload }) =>
@@ -179,13 +231,11 @@ export function EntryDetail({
       }
     },
     onSuccess: async (_data, vars) => {
-      if (vars.patch.password !== undefined) {
-        setRevealedPassword(vars.patch.password);
-      }
       pushToast({ kind: 'success', title: t.savedToast });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['entries'] }),
         queryClient.invalidateQueries({ queryKey: ['entry-details', vars.uuid] }),
+        queryClient.invalidateQueries({ queryKey: ['entry-password', vars.uuid] }),
         queryClient.invalidateQueries({ queryKey: ['entry-history', vars.uuid] }),
         queryClient.invalidateQueries({ queryKey: ['group-tree'] }),
       ]);
@@ -205,7 +255,7 @@ export function EntryDetail({
     },
   });
 
-  if (!selectedEntryId || !detailsQuery.data) {
+  if (!entryModalOpen && (!selectedEntryId || !detailsQuery.data)) {
     return (
       <section
         ref={detailRef}
@@ -228,25 +278,77 @@ export function EntryDetail({
     );
   }
 
-  const details = detailsQuery.data;
-  const uuid = details.summary.uuid;
+  const details = entryModalOpen ? null : detailsQuery.data!;
+  const uuid = details?.summary.uuid ?? '';
+  const loadedPassword = passwordQuery.data ?? '';
+  const passwordDirty =
+    !entryModalOpen && !presentationMode && passwordQuery.data !== undefined && passwordDraft !== loadedPassword;
 
-  async function handleToggleReveal() {
-    if (revealedPassword !== null) {
-      setRevealedPassword(null);
+  const isViewDirty = Boolean(
+    details &&
+      (titleDraft.trim() !== details.summary.title ||
+        usernameDraft !== details.summary.username ||
+        urlDraft.trim() !== details.summary.url ||
+        notesDraft !== details.notes ||
+        parseTags(tagsDraft).join(',') !== details.summary.tags.join(',') ||
+        passwordDirty),
+  );
+
+  async function handleSave(e?: FormEvent) {
+    e?.preventDefault();
+    if (entryModalOpen) {
+      if (!titleDraft.trim() || creating) return;
+      setCreating(true);
+      try {
+        const createdUuid = await api.addEntry({
+          title: titleDraft.trim(),
+          groupPath: groupPathDraft.trim() || undefined,
+          username: usernameDraft.trim() || undefined,
+          password: passwordDraft || undefined,
+          url: urlDraft.trim() || undefined,
+          notes: notesDraft.trim() || undefined,
+          tags: parseTags(tagsDraft),
+        });
+        setEntryModalOpen(false);
+        setSelectedEntryId(createdUuid);
+        pushToast({ kind: 'success', title: t.savedToast });
+        await queryClient.invalidateQueries({ queryKey: ['entries'] });
+        await queryClient.invalidateQueries({ queryKey: ['group-tree'] });
+      } finally {
+        setCreating(false);
+      }
       return;
     }
-    const secret = await api.revealPassword(uuid);
-    setRevealedPassword(secret);
-  }
 
-  async function startPasswordEdit() {
-    const secret = revealedPassword ?? (await api.revealPassword(uuid));
-    setDraftValue(secret);
-    setEditingField('password');
+    if (!details || !isViewDirty || updateMutation.isPending) return;
+    const patch: EntryPatchPayload = {};
+    const trimmedTitle = titleDraft.trim();
+    if (trimmedTitle && trimmedTitle !== details.summary.title) {
+      patch.title = trimmedTitle;
+    }
+    if (usernameDraft !== details.summary.username) {
+      patch.username = usernameDraft;
+    }
+    if (urlDraft.trim() !== details.summary.url) {
+      patch.url = urlDraft.trim();
+    }
+    if (notesDraft !== details.notes) {
+      patch.notes = notesDraft;
+    }
+    const parsedTags = parseTags(tagsDraft);
+    if (parsedTags.join(',') !== details.summary.tags.join(',')) {
+      patch.tags = parsedTags;
+    }
+    if (passwordDirty) {
+      patch.password = passwordDraft;
+    }
+    if (Object.keys(patch).length > 0) {
+      updateMutation.mutate({ uuid, patch });
+    }
   }
 
   async function handleCopy(field: 'password' | 'username' | 'totp') {
+    if (!uuid) return;
     await api.copySecret(uuid, field);
     pushToast({
       kind: 'clipboard',
@@ -260,555 +362,424 @@ export function EntryDetail({
     });
   }
 
-  function commitInlineEdit(field: Exclude<EditingField, null>, value: string) {
-    setEditingField(null);
-    const trimmed = value.trim();
-    if (field === 'title') {
-      if (!trimmed || trimmed === details.summary.title) return;
-      updateMutation.mutate({ uuid, patch: { title: trimmed } });
-    } else if (field === 'username') {
-      if (value === details.summary.username) return;
-      updateMutation.mutate({ uuid, patch: { username: value } });
-    } else if (field === 'url') {
-      if (trimmed === details.summary.url) return;
-      updateMutation.mutate({ uuid, patch: { url: trimmed } });
-    } else if (field === 'password') {
-      updateMutation.mutate({ uuid, patch: { password: value } });
-    }
-  }
-
-  function cancelInlineEdit() {
-    setEditingField(null);
-  }
+  const displayedPassword = entryModalOpen
+    ? passwordDraft
+    : presentationMode
+      ? ''
+      : passwordDraft;
 
   return (
     <section
       ref={detailRef}
       tabIndex={-1}
       aria-label="Detalhes da entrada"
-      className="flex-1 overflow-y-auto bg-bg-subtle/40 p-6 outline-none"
+      className="flex-1 overflow-y-auto bg-bg p-6 lg:px-10 lg:py-7 outline-none"
     >
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={uuid}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.14 }}
-          className="max-w-2xl mx-auto flex flex-col gap-5"
-        >
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3.5 min-w-0 flex-1">
-              <Avatar title={details.summary.title} url={details.summary.url} size="lg" />
-              <div className="min-w-0 flex-1">
-                {editingField === 'title' ? (
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      autoFocus
-                      value={draftValue}
-                      aria-label={t.titleLabel}
-                      onChange={(e) => setDraftValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitInlineEdit('title', draftValue);
-                        } else if (e.key === 'Escape') {
-                          cancelInlineEdit();
-                        }
-                      }}
-                      onBlur={() => commitInlineEdit('title', draftValue)}
-                      className="text-base font-semibold h-8"
-                    />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingField('title');
-                      setDraftValue(details.summary.title);
-                    }}
-                    title={t.inlineEditHint}
-                    className="group/title inline-flex items-center gap-2 text-left rounded-md px-1 -ml-1 hover:bg-surface-hover transition-colors cursor-text max-w-full"
-                  >
-                    <h2 className="text-xl font-semibold text-fg tracking-tight truncate">
-                      {details.summary.title}
-                    </h2>
-                    <Pencil
-                      className="h-3.5 w-3.5 text-fg-subtle opacity-0 group-hover/title:opacity-100 transition-opacity shrink-0"
-                      aria-hidden="true"
-                    />
-                  </button>
-                )}
-
-                <p className="text-xs text-fg-muted mt-0.5 flex items-center gap-1.5">
-                  <span>{details.summary.groupPath || 'Root'}</span>
-                </p>
-
-                {details.summary.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {details.summary.tags.map((tag) => (
-                      <Badge key={tag} variant={tag === 'Passkey' ? 'accent' : 'neutral'}>
-                        {tag === 'Passkey' && <KeyRound className="h-3 w-3" aria-hidden="true" />}
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
+      <motion.form
+        key={entryModalOpen ? 'create-entry' : uuid}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.14 }}
+        onSubmit={(e) => void handleSave(e)}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            void handleSave();
+          }
+        }}
+        className="w-full flex flex-col gap-6"
+      >
+        {/* Header — aberto e em largura total */}
+        <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-border/70">
+          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+            <Avatar
+              title={titleDraft || t.newEntry}
+              url={urlDraft}
+              iconId={details?.summary.iconId}
+              customIconUuid={details?.summary.customIconUuid}
+              size="lg"
+            />
+            <div className="min-w-0 flex-1 flex flex-col gap-2">
+              <Input
+                ref={titleInputRef}
+                autoFocus={entryModalOpen}
+                required
+                placeholder={t.titleLabel}
+                aria-label={t.titleLabel}
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                className="text-base font-semibold h-9"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Input
+                  placeholder={t.groupLabel}
+                  aria-label={t.groupLabel}
+                  value={groupPathDraft || (entryModalOpen ? '' : 'Root')}
+                  readOnly={!entryModalOpen}
+                  onChange={(e) => setGroupPathDraft(e.target.value)}
+                  className={entryModalOpen ? 'h-7 text-xs' : 'h-7 text-xs text-fg-muted'}
+                />
+                <Input
+                  placeholder={t.tagsLabel}
+                  aria-label={t.tagsLabel}
+                  value={tagsDraft}
+                  onChange={(e) => setTagsDraft(e.target.value)}
+                  className="h-7 text-xs"
+                />
               </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <IconButton
-                size="sm"
-                variant="secondary"
-                label={t.editField}
-                shortcut="E"
-                onPress={() => {
-                  setEditingField('title');
-                  setDraftValue(details.summary.title);
-                }}
-              >
-                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-              </IconButton>
-
-              <Menu
-                trigger={
-                  <Button size="sm" variant="secondary" isIconOnly aria-label="Entry actions">
-                    <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                  </Button>
-                }
-              >
-                <MenuItem
-                  icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                  shortcut="Ctrl+C"
-                  onAction={() => void handleCopy('password')}
-                >
-                  {t.copyPassword}
-                </MenuItem>
-                <MenuItem
-                  icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                  shortcut="Ctrl+B"
-                  onAction={() => void handleCopy('username')}
-                >
-                  {t.copyUsername}
-                </MenuItem>
-                {details.hasOtp && (
-                  <MenuItem
-                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-                    shortcut="Ctrl+Shift+C"
-                    onAction={() => void handleCopy('totp')}
-                  >
-                    {t.copyTotp}
-                  </MenuItem>
-                )}
-                {details.summary.url && (
-                  <MenuItem
-                    icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
-                    onAction={() => {
-                      window.open(details.summary.url, '_blank', 'noopener,noreferrer');
-                    }}
-                  >
-                    {t.openUrl}
-                  </MenuItem>
-                )}
-                <MenuSeparator />
-                <MenuItem
-                  variant="danger"
-                  icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
-                  shortcut="Del"
-                  onAction={() => setDeleteConfirmId(uuid)}
-                >
-                  {t.deleteEntry}
-                </MenuItem>
-              </Menu>
-
-              <Button
-                variant="danger"
-                size="sm"
-                onPress={() => setDeleteConfirmId(uuid)}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {t.deleteEntry}
-              </Button>
             </div>
           </div>
 
-          {/* Primary credentials panel */}
-          <div className="rounded-xl border border-border bg-surface divide-y divide-border overflow-hidden shadow-xs">
-            {/* Username row */}
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-medium text-fg-subtle">{t.usernameLabel}</p>
-                {editingField === 'username' ? (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <Input
-                      autoFocus
-                      value={draftValue}
-                      aria-label={t.usernameLabel}
-                      onChange={(e) => setDraftValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitInlineEdit('username', draftValue);
-                        } else if (e.key === 'Escape') {
-                          cancelInlineEdit();
-                        }
-                      }}
-                      onBlur={() => commitInlineEdit('username', draftValue)}
-                      className="font-mono h-7"
-                    />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingField('username');
-                      setDraftValue(details.summary.username);
-                    }}
-                    title={t.inlineEditHint}
-                    className="mt-0.5 text-[13px] font-mono text-fg hover:text-accent transition-colors text-left truncate block max-w-full cursor-text"
-                  >
-                    {presentationMode ? '••••••' : details.summary.username || '—'}
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <IconButton
-                  size="xs"
-                  variant="ghost"
-                  label={t.editField}
-                  onPress={() => {
-                    setEditingField('username');
-                    setDraftValue(details.summary.username);
-                  }}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {entryModalOpen && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onPress={() => setEntryModalOpen(false)}
+              >
+                {t.cancel}
+              </Button>
+            )}
+
+            <Button
+              type="submit"
+              size="sm"
+              variant="primary"
+              isDisabled={entryModalOpen ? !titleDraft.trim() : !isViewDirty}
+              isLoading={entryModalOpen ? creating : updateMutation.isPending}
+            >
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+              {t.saveEntry}
+            </Button>
+
+            {!entryModalOpen && details && (
+              <>
+                <Menu
+                  trigger={
+                    <Button size="sm" variant="secondary" isIconOnly aria-label="Entry actions">
+                      <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  }
                 >
-                  <Pencil className="h-3 w-3" aria-hidden="true" />
-                </IconButton>
-                <Button size="sm" variant="secondary" onPress={() => void handleCopy('username')}>
+                  <MenuItem
+                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Ctrl+C"
+                    onAction={() => void handleCopy('password')}
+                  >
+                    {t.copyPassword}
+                  </MenuItem>
+                  <MenuItem
+                    icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Ctrl+B"
+                    onAction={() => void handleCopy('username')}
+                  >
+                    {t.copyUsername}
+                  </MenuItem>
+                  {details.hasOtp && (
+                    <MenuItem
+                      icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                      shortcut="Ctrl+Shift+C"
+                      onAction={() => void handleCopy('totp')}
+                    >
+                      {t.copyTotp}
+                    </MenuItem>
+                  )}
+                  {urlDraft && (
+                    <MenuItem
+                      icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+                      onAction={() => {
+                        window.open(urlDraft, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      {t.openUrl}
+                    </MenuItem>
+                  )}
+                  <MenuSeparator />
+                  <MenuItem
+                    variant="danger"
+                    icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                    shortcut="Del"
+                    onAction={() => setDeleteConfirmId(uuid)}
+                  >
+                    {t.deleteEntry}
+                  </MenuItem>
+                </Menu>
+
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onPress={() => setDeleteConfirmId(uuid)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.deleteEntry}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Campos principais abertos em grid responsivo (sem cards) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
+          {/* Username */}
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <label className="text-xs font-medium text-fg-muted">{t.usernameLabel}</label>
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder={t.usernameLabel}
+                aria-label={t.usernameLabel}
+                value={presentationMode ? '••••••' : usernameDraft}
+                disabled={presentationMode}
+                onChange={(e) => setUsernameDraft(e.target.value)}
+                className="font-mono h-9"
+              />
+              {!entryModalOpen && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="shrink-0 h-9"
+                  onPress={() => void handleCopy('username')}
+                >
                   <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                   {t.copyUsername}
                 </Button>
-              </div>
-            </div>
-
-            {/* Password row */}
-            <div className="flex flex-col gap-2 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-medium text-fg-subtle">{t.passwordLabel}</p>
-                  {editingField === 'password' ? (
-                    <div className="flex flex-col gap-2 mt-1">
-                      <div className="flex items-center gap-1.5">
-                        <PasswordInput
-                          autoFocus
-                          value={draftValue}
-                          aria-label={t.passwordLabel}
-                          revealLabel={t.reveal}
-                          hideLabel={t.hide}
-                          capsLockLabel={t.capsLockOn}
-                          onChange={(e) => setDraftValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              commitInlineEdit('password', draftValue);
-                            } else if (e.key === 'Escape') {
-                              cancelInlineEdit();
-                            }
-                          }}
-                          generatorSlot={
-                            <PasswordGeneratorPopover t={t} onSelect={setDraftValue} />
-                          }
-                        />
-                        <IconButton
-                          size="sm"
-                          variant="primary"
-                          label={t.saveEntry}
-                          onPress={() => commitInlineEdit('password', draftValue)}
-                        >
-                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                        </IconButton>
-                        <IconButton
-                          size="sm"
-                          variant="ghost"
-                          label={t.cancel}
-                          onPress={cancelInlineEdit}
-                        >
-                          <X className="h-3.5 w-3.5" aria-hidden="true" />
-                        </IconButton>
-                      </div>
-                      <StrengthMeter
-                        password={draftValue}
-                        labels={{
-                          weak: t.strengthWeak,
-                          fair: t.strengthFair,
-                          good: t.strengthGood,
-                          strong: t.strengthStrong,
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <p className="mt-0.5 text-[13px] font-mono text-fg break-all">
-                      {presentationMode || revealedPassword === null
-                        ? '••••••••••••'
-                        : revealedPassword || '—'}
-                    </p>
-                  )}
-                </div>
-
-                {editingField !== 'password' && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {!presentationMode && (
-                      <>
-                        <IconButton
-                          size="xs"
-                          variant="ghost"
-                          label={t.editField}
-                          onPress={() => void startPasswordEdit()}
-                        >
-                          <Pencil className="h-3 w-3" aria-hidden="true" />
-                        </IconButton>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onPress={() => void handleToggleReveal()}
-                        >
-                          {revealedPassword !== null ? (
-                            <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
-                          ) : (
-                            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                          )}
-                          {revealedPassword !== null ? t.hide : t.reveal}
-                        </Button>
-                      </>
-                    )}
-                    <Button size="sm" variant="primary" onPress={() => void handleCopy('password')}>
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t.copyPassword}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {editingField !== 'password' && revealedPassword !== null && !presentationMode && (
-                <StrengthMeter
-                  password={revealedPassword}
-                  labels={{
-                    weak: t.strengthWeak,
-                    fair: t.strengthFair,
-                    good: t.strengthGood,
-                    strong: t.strengthStrong,
-                  }}
-                />
               )}
             </div>
+          </div>
 
-            {/* TOTP row */}
-            {details.hasOtp && totpQuery.data && !presentationMode && (
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div>
-                  <p className="text-[11px] font-medium text-fg-subtle">{t.totpCode}</p>
-                  <p className="text-xl font-mono font-semibold tracking-wider text-accent tabular-nums mt-0.5">
-                    {formatTotpCode(totpQuery.data.code)}
-                  </p>
-                </div>
+          {/* Password */}
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <label className="text-xs font-medium text-fg-muted">{t.passwordLabel}</label>
+            <div className="flex items-center gap-2">
+              <PasswordInput
+                placeholder={presentationMode ? '••••••••••••' : t.passwordLabel}
+                aria-label={t.passwordLabel}
+                revealLabel={t.reveal}
+                hideLabel={t.hide}
+                capsLockLabel={t.capsLockOn}
+                value={displayedPassword}
+                disabled={presentationMode}
+                onChange={(e) => setPasswordDraft(e.target.value)}
+                className="h-9"
+                generatorSlot={
+                  !presentationMode ? (
+                    <PasswordGeneratorPopover
+                      t={t}
+                      onSelect={(pw) => setPasswordDraft(pw)}
+                    />
+                  ) : undefined
+                }
+              />
+              {!entryModalOpen && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  className="shrink-0 h-9"
+                  onPress={() => void handleCopy('password')}
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.copyPassword}
+                </Button>
+              )}
+            </div>
+            {displayedPassword && !presentationMode && (
+              <StrengthMeter
+                password={displayedPassword}
+                labels={{
+                  weak: t.strengthWeak,
+                  fair: t.strengthFair,
+                  good: t.strengthGood,
+                  strong: t.strengthStrong,
+                }}
+              />
+            )}
+          </div>
+
+          {/* URL */}
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <label className="text-xs font-medium text-fg-muted">{t.urlLabel}</label>
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="https://..."
+                aria-label={t.urlLabel}
+                value={urlDraft}
+                onChange={(e) => setUrlDraft(e.target.value)}
+                className="h-9"
+              />
+              {urlDraft.trim() && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="shrink-0 h-9"
+                  onPress={() => window.open(urlDraft.trim(), '_blank', 'noopener,noreferrer')}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.openUrl}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* TOTP */}
+          {!entryModalOpen && details?.hasOtp && totpQuery.data && !presentationMode && (
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label className="text-xs font-medium text-fg-muted">{t.totpCode}</label>
+              <div className="flex items-center justify-between gap-3 h-9">
+                <p className="text-xl font-mono font-semibold tracking-wider text-accent tabular-nums">
+                  {formatTotpCode(totpQuery.data.code)}
+                </p>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <ProgressRing
                       value={totpRemaining}
                       max={totpQuery.data.periodSecs}
-                      size={28}
+                      size={26}
                     />
                     <span className="text-xs font-mono text-fg-muted tabular-nums w-7 text-right">
                       {totpRemaining}s
                     </span>
                   </div>
-                  <Button size="sm" variant="secondary" onPress={() => void handleCopy('totp')}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => void handleCopy('totp')}
+                  >
                     <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                     {t.copyTotp}
                   </Button>
                 </div>
               </div>
-            )}
-
-            {/* URL row */}
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-medium text-fg-subtle">{t.urlLabel}</p>
-                {editingField === 'url' ? (
-                  <Input
-                    autoFocus
-                    value={draftValue}
-                    aria-label={t.urlLabel}
-                    onChange={(e) => setDraftValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitInlineEdit('url', draftValue);
-                      } else if (e.key === 'Escape') {
-                        cancelInlineEdit();
-                      }
-                    }}
-                    onBlur={() => commitInlineEdit('url', draftValue)}
-                    className="mt-1 h-7"
-                  />
-                ) : details.summary.url ? (
-                  <a
-                    href={details.summary.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-0.5 inline-flex items-center gap-1 text-[13px] text-accent hover:underline break-all"
-                  >
-                    <span>{details.summary.url}</span>
-                    <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingField('url');
-                      setDraftValue('');
-                    }}
-                    className="mt-0.5 text-[13px] text-fg-subtle hover:text-fg cursor-text"
-                  >
-                    —
-                  </button>
-                )}
-              </div>
-              <IconButton
-                size="xs"
-                variant="ghost"
-                label={t.editField}
-                onPress={() => {
-                  setEditingField('url');
-                  setDraftValue(details.summary.url);
-                }}
-              >
-                <Pencil className="h-3 w-3" aria-hidden="true" />
-              </IconButton>
-            </div>
-
-            {/* Notes row */}
-            <div className="px-4 py-3 flex flex-col gap-1.5">
-              <p className="text-[11px] font-medium text-fg-subtle">{t.notesLabel}</p>
-              <TextArea
-                aria-label={t.notesLabel}
-                value={presentationMode ? '••••••••••••' : notesDraft}
-                disabled={presentationMode}
-                onChange={(e) => {
-                  setNotesDraft(e.target.value);
-                  setNotesDirty(true);
-                }}
-                onBlur={() => {
-                  if (notesDirty && notesDraft !== details.notes) {
-                    updateMutation.mutate({ uuid, patch: { notes: notesDraft } });
-                  }
-                  setNotesDirty(false);
-                }}
-                placeholder="—"
-                rows={2}
-                className="bg-bg-subtle/60 border-transparent focus:border-ring focus:bg-surface"
-              />
-            </div>
-          </div>
-
-          {/* Custom fields */}
-          {details.customFields.length > 0 && (
-            <div className="rounded-xl border border-border bg-surface overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowCustomFields((v) => !v)}
-                className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-fg hover:bg-surface-hover/50 transition-colors cursor-pointer"
-              >
-                <span>
-                  {t.customFields} ({details.customFields.length})
-                </span>
-                {showCustomFields ? (
-                  <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
-                )}
-              </button>
-              {showCustomFields && (
-                <div className="border-t border-border divide-y divide-border px-4">
-                  {details.customFields.map((field) => (
-                    <div key={field.name} className="flex items-center justify-between gap-4 py-2 text-xs">
-                      <span className="font-mono text-fg-muted truncate">{field.name}</span>
-                      <span className="font-mono text-fg">
-                        {field.protected || presentationMode ? '••••••••' : field.value ?? '—'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
-          {/* Attachments */}
-          {details.attachments.length > 0 && (
-            <div className="rounded-xl border border-border bg-surface p-4 flex flex-col gap-2.5">
-              <p className="text-xs font-semibold text-fg">{t.attachments}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {details.attachments.map((att) => (
-                  <Badge key={att} variant="neutral">
-                    <Paperclip className="h-3 w-3" aria-hidden="true" />
-                    {att}
-                  </Badge>
+          {/* Notes */}
+          <div className="flex flex-col gap-1.5 lg:col-span-2">
+            <label className="text-xs font-medium text-fg-muted">{t.notesLabel}</label>
+            <TextArea
+              aria-label={t.notesLabel}
+              value={presentationMode ? '••••••••••••' : notesDraft}
+              disabled={presentationMode}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              placeholder={t.notesLabel}
+              rows={4}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 text-[11px] text-fg-subtle">
+          <Kbd>Ctrl+Enter</Kbd>
+          <span>{t.saveEntry}</span>
+          {entryModalOpen && (
+            <>
+              <span>·</span>
+              <Kbd>Esc</Kbd>
+              <span>{t.cancel}</span>
+            </>
+          )}
+        </div>
+
+        {/* Custom fields — seção aberta sem card */}
+        {!entryModalOpen && details && details.customFields.length > 0 && (
+          <div className="border-t border-border/70 pt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCustomFields((v) => !v)}
+              className="w-full flex items-center justify-between py-1 text-xs font-semibold text-fg hover:text-accent transition-colors cursor-pointer"
+            >
+              <span>
+                {t.customFields} ({details.customFields.length})
+              </span>
+              {showCustomFields ? (
+                <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
+              )}
+            </button>
+            {showCustomFields && (
+              <div className="divide-y divide-border/60">
+                {details.customFields.map((field) => (
+                  <div key={field.name} className="flex items-center justify-between gap-4 py-2 text-xs">
+                    <span className="font-mono text-fg-muted truncate">{field.name}</span>
+                    <span className="font-mono text-fg">
+                      {field.protected || presentationMode ? '••••••••' : field.value ?? '—'}
+                    </span>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+        )}
 
-          {/* History timeline */}
-          {historyQuery.data && historyQuery.data.length > 0 && (
-            <div className="rounded-xl border border-border bg-surface overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowHistory((v) => !v)}
-                className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-fg hover:bg-surface-hover/50 transition-colors cursor-pointer"
-              >
-                <span className="flex items-center gap-1.5">
-                  <History className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
-                  {t.history} ({historyQuery.data.length})
-                </span>
-                {showHistory ? (
-                  <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
-                )}
-              </button>
-              {showHistory && (
-                <div className="border-t border-border divide-y divide-border">
-                  {historyQuery.data.map((h) => (
-                    <div
-                      key={h.index}
-                      className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium text-fg truncate">
-                          #{h.index + 1} · {h.title}
-                        </p>
-                        <p className="text-[11px] text-fg-muted truncate">
-                          {h.username || '—'} · {h.lastModified ?? '—'}
-                        </p>
-                      </div>
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        isLoading={restoreMutation.isPending}
-                        onPress={() => restoreMutation.mutate({ uuid, index: h.index })}
-                      >
-                        <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                        {t.restoreVersion}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
+        {/* Attachments — seção aberta sem card */}
+        {!entryModalOpen && details && details.attachments.length > 0 && (
+          <div className="border-t border-border/70 pt-4 flex flex-col gap-2.5">
+            <p className="text-xs font-semibold text-fg">{t.attachments}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {details.attachments.map((att) => (
+                <Badge key={att} variant="neutral">
+                  <Paperclip className="h-3 w-3" aria-hidden="true" />
+                  {att}
+                </Badge>
+              ))}
             </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+          </div>
+        )}
+
+        {/* History timeline — seção aberta sem card */}
+        {!entryModalOpen && historyQuery.data && historyQuery.data.length > 0 && (
+          <div className="border-t border-border/70 pt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="w-full flex items-center justify-between py-1 text-xs font-semibold text-fg hover:text-accent transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <History className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                {t.history} ({historyQuery.data.length})
+              </span>
+              {showHistory ? (
+                <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
+              )}
+            </button>
+            {showHistory && (
+              <div className="divide-y divide-border/60">
+                {historyQuery.data.map((h) => (
+                  <div
+                    key={h.index}
+                    className="flex items-center justify-between gap-3 py-2.5 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-fg truncate">
+                        #{h.index + 1} · {h.title}
+                      </p>
+                      <p className="text-[11px] text-fg-muted truncate">
+                        {h.username || '—'} · {formatHistoryDate(h.lastModified, language)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="secondary"
+                      isLoading={restoreMutation.isPending}
+                      onPress={() => restoreMutation.mutate({ uuid, index: h.index })}
+                    >
+                      <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                      {t.restoreVersion}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </motion.form>
     </section>
   );
 }

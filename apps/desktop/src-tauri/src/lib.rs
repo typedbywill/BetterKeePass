@@ -125,7 +125,7 @@ fn with_vault_mut<T>(
 }
 
 #[tauri::command]
-fn open_vault(
+async fn open_vault(
     state: State<'_, AppState>,
     path: String,
     password: String,
@@ -134,7 +134,17 @@ fn open_vault(
     let pb = PathBuf::from(path);
     let kf = keyfile.map(PathBuf::from);
     let secret = (!password.is_empty()).then(|| SecretString::from(password));
-    let vault = Vault::open(&pb, secret.clone(), kf.as_deref()).map_err(|e| e.to_string())?;
+    let vault = {
+        let pb_clone = pb.clone();
+        let kf_clone = kf.clone();
+        let secret_clone = secret.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            Vault::open(&pb_clone, secret_clone, kf_clone.as_deref())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
+    };
     let mut guard = state
         .session
         .lock()
@@ -150,7 +160,7 @@ fn open_vault(
 }
 
 #[tauri::command]
-fn create_vault(
+async fn create_vault(
     state: State<'_, AppState>,
     path: String,
     password: String,
@@ -158,10 +168,19 @@ fn create_vault(
 ) -> Result<(), String> {
     let pb = PathBuf::from(path);
     let secret = Some(SecretString::from(password));
-    let vault = Vault::create(name.as_deref());
-    vault
-        .save(&pb, secret.clone(), None)
-        .map_err(|e| e.to_string())?;
+    let vault = {
+        let pb_clone = pb.clone();
+        let secret_clone = secret.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vault, String> {
+            let vault = Vault::create(name.as_deref());
+            vault
+                .save(&pb_clone, secret_clone, None)
+                .map_err(|e| e.to_string())?;
+            Ok(vault)
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
     let mut guard = state
         .session
         .lock()
@@ -351,6 +370,52 @@ fn delete_entry(
 }
 
 #[tauri::command]
+fn move_entry(
+    state: State<'_, AppState>,
+    uuid: String,
+    group_path: String,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        u.vault
+            .move_entry(parsed, Some(&group_path))
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+fn get_custom_icon(state: State<'_, AppState>, uuid: String) -> Result<Option<String>, String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        let Some(bytes) = u.vault.custom_icon_data(parsed) else {
+            return Ok(None);
+        };
+        let Some(mime) = detect_icon_mime(&bytes) else {
+            return Ok(None);
+        };
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(Some(format!("data:{mime};base64,{encoded}")))
+    })
+}
+
+#[tauri::command]
+fn create_group(state: State<'_, AppState>, group_path: String) -> Result<String, String> {
+    with_vault_mut(&state, |u| {
+        let uuid = u
+            .vault
+            .create_group(&group_path)
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())?;
+        Ok(uuid.to_string())
+    })
+}
+
+#[tauri::command]
 fn generate_password_cmd(length: usize) -> Result<String, String> {
     let pw = generate_password(&PasswordOptions {
         length,
@@ -429,29 +494,49 @@ fn favicon_cache_dir() -> Option<PathBuf> {
         .map(|home| PathBuf::from(home).join(".cache/betterkeepass/favicons"))
 }
 
-fn detect_icon_mime(bytes: &[u8]) -> &'static str {
+fn detect_icon_mime(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
+        Some("image/png")
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        "image/gif"
-    } else if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
-        "image/svg+xml"
+        Some("image/gif")
+    } else if bytes.starts_with(b"\xFF\xD8\xFF") {
+        Some("image/jpeg")
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        "image/webp"
+        Some("image/webp")
+    } else if bytes.starts_with(b"\x00\x00\x01\x00") || bytes.starts_with(b"\x00\x00\x02\x00") {
+        Some("image/x-icon")
     } else {
-        "image/x-icon"
+        let trimmed = std::str::from_utf8(bytes).ok()?.trim_start();
+        if trimmed.starts_with("<svg")
+            || (trimmed.starts_with("<?xml") && trimmed.contains("<svg"))
+        {
+            Some("image/svg+xml")
+        } else {
+            None
+        }
     }
 }
 
-fn fetch_icon_bytes(agent: &ureq::Agent, url: &str) -> Option<Vec<u8>> {
-    let response = agent.get(url).call().ok()?;
+fn fetch_icon_bytes(agent: &ureq::Agent, url: &str) -> Option<(Vec<u8>, &'static str)> {
+    let response = agent
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; BetterKeePass/0.1)")
+        .header("Accept", "image/png,image/svg+xml,image/x-icon,image/*;q=0.8")
+        .call()
+        .ok()?;
+    if let Some(ct) = response.headers().get("content-type").and_then(|v| v.to_str().ok())
+        && ct.to_ascii_lowercase().starts_with("text/html")
+    {
+        return None;
+    }
     let mut reader = response.into_body().into_reader().take(MAX_FAVICON_BYTES);
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).ok()?;
     if buf.is_empty() || buf.len() as u64 >= MAX_FAVICON_BYTES {
         return None;
     }
-    Some(buf)
+    let mime = detect_icon_mime(&buf)?;
+    Some((buf, mime))
 }
 
 #[tauri::command]
@@ -475,24 +560,30 @@ fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<Stri
         && path.exists()
         && let Ok(cached) = fs::read_to_string(path)
         && cached.starts_with("data:image/")
+        && let Some((_, b64)) = cached.split_once(";base64,")
+        && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64.trim())
+        && detect_icon_mime(&decoded).is_some()
     {
         return Ok(Some(cached));
     }
 
     let agent_config = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(3)))
+        .timeout_global(Some(Duration::from_secs(4)))
         .build();
     let agent: ureq::Agent = agent_config.into();
 
-    let primary = format!("https://{clean_domain}/favicon.ico");
-    let fallback = format!("https://{clean_domain}/apple-touch-icon.png");
-    let Some(bytes) =
-        fetch_icon_bytes(&agent, &primary).or_else(|| fetch_icon_bytes(&agent, &fallback))
+    let candidates = [
+        format!("https://{clean_domain}/favicon.ico"),
+        format!("https://{clean_domain}/apple-touch-icon.png"),
+        format!("https://{clean_domain}/favicon.png"),
+    ];
+    let Some((bytes, mime)) = candidates
+        .iter()
+        .find_map(|url| fetch_icon_bytes(&agent, url))
     else {
         return Ok(None);
     };
 
-    let mime = detect_icon_mime(&bytes);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let data_url = format!("data:{mime};base64,{encoded}");
 
@@ -568,6 +659,9 @@ pub fn run() {
             update_entry,
             restore_history,
             delete_entry,
+            move_entry,
+            get_custom_icon,
+            create_group,
             generate_password_cmd,
             generate_passphrase_cmd,
             analyze_health_cmd,

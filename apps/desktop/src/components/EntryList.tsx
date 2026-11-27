@@ -68,6 +68,8 @@ export function EntryList({
     setSortBy,
     listWidth,
     clipboardClearSeconds,
+    draggingEntryId,
+    setDraggingEntryId,
     pushToast,
     setDeleteConfirmId,
   } = useUiStore();
@@ -197,14 +199,24 @@ export function EntryList({
               ? '••••••'
               : entry.username || entry.url || entry.groupPath || '—';
 
+            const isDragging = draggingEntryId === entry.uuid;
+
             return (
               <li key={entry.uuid} className="group relative">
                 <div
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', entry.uuid);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggingEntryId(entry.uuid);
+                  }}
+                  onDragEnd={() => setDraggingEntryId(null)}
                   className={cn(
                     'flex items-center gap-2.5 rounded-lg p-2 transition-colors',
                     selected
                       ? 'bg-surface border border-border shadow-xs'
                       : 'border border-transparent hover:bg-surface-hover/70',
+                    isDragging && 'opacity-50',
                   )}
                 >
                   <button
@@ -212,7 +224,13 @@ export function EntryList({
                     onClick={() => setSelectedEntryId(entry.uuid)}
                     className="flex flex-1 items-center gap-2.5 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md cursor-pointer"
                   >
-                    <Avatar title={entry.title} url={entry.url} size="md" />
+                    <Avatar
+                      title={entry.title}
+                      url={entry.url}
+                      iconId={entry.iconId}
+                      customIconUuid={entry.customIconUuid}
+                      size="md"
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-medium text-[13px] text-fg truncate">

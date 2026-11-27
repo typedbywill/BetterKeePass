@@ -7,6 +7,8 @@ export interface EntrySummary {
   url: string;
   tags: string[];
   groupPath: string;
+  iconId?: number | null;
+  customIconUuid?: string | null;
 }
 
 export interface GroupNode {
@@ -15,6 +17,8 @@ export interface GroupNode {
   path: string;
   entryCount: number;
   isRecycleBin: boolean;
+  iconId?: number | null;
+  customIconUuid?: string | null;
   children: GroupNode[];
 }
 
@@ -69,6 +73,7 @@ export interface UiConfig {
   listWidth: number;
   fetchFavicons: boolean;
   sortBy: string;
+  expandedGroups?: string[];
 }
 
 export interface AppConfig {
@@ -149,6 +154,8 @@ const mockEntries: (EntryDetailsView & { _secret: string })[] = [
   },
 ];
 
+const mockExtraGroups: string[] = [];
+
 const mockHistory = new Map<
   string,
   { snapshot: EntryDetailsView & { _secret: string }; lastModified: string }[]
@@ -165,6 +172,7 @@ let mockConfig: AppConfig = {
     listWidth: 320,
     fetchFavicons: false,
     sortBy: 'title',
+    expandedGroups: [],
   },
   managedByNix: false,
 };
@@ -221,7 +229,7 @@ export const api = {
     if (hasTauri()) {
       return invoke('get_group_tree');
     }
-    return {
+    const base: GroupNode = {
       uuid: 'root',
       name: 'Root',
       path: '',
@@ -257,6 +265,28 @@ export const api = {
         },
       ],
     };
+    for (const gp of mockExtraGroups) {
+      const segments = gp.split('/').map((s) => s.trim()).filter(Boolean);
+      let cur = base;
+      let acc = '';
+      for (const seg of segments) {
+        acc = acc ? `${acc}/${seg}` : seg;
+        let found = cur.children.find((c) => c.name === seg);
+        if (!found) {
+          found = {
+            uuid: `mock-${acc}`,
+            name: seg,
+            path: acc,
+            entryCount: mockEntries.filter((e) => e.summary.groupPath === acc).length,
+            isRecycleBin: false,
+            children: [],
+          };
+          cur.children.push(found);
+        }
+        cur = found;
+      }
+    }
+    return base;
   },
   async getEntryDetails(uuid: string): Promise<EntryDetailsView> {
     if (hasTauri()) {
@@ -385,6 +415,31 @@ export const api = {
         entry.summary.groupPath = 'Recycle Bin';
       }
     }
+  },
+  async moveEntry(uuid: string, groupPath: string): Promise<void> {
+    if (hasTauri()) {
+      await invoke('move_entry', { uuid, groupPath });
+      return;
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    if (!found) throw new Error('Entry not found');
+    found.summary.groupPath = groupPath;
+  },
+  async getCustomIcon(uuid: string): Promise<string | null> {
+    if (hasTauri()) {
+      return invoke('get_custom_icon', { uuid });
+    }
+    return null;
+  },
+  async createGroup(groupPath: string): Promise<string> {
+    if (hasTauri()) {
+      return invoke('create_group', { groupPath });
+    }
+    const clean = groupPath.trim();
+    if (clean && !mockExtraGroups.includes(clean)) {
+      mockExtraGroups.push(clean);
+    }
+    return `mock-${clean}`;
   },
   async generatePassword(length = 20): Promise<string> {
     if (hasTauri()) {

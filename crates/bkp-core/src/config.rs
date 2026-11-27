@@ -62,6 +62,8 @@ pub struct UiConfig {
     pub fetch_favicons: bool,
     /// Ordenação padrão da lista (`title` ou `recent`).
     pub sort_by: String,
+    /// UUIDs dos grupos expandidos na barra lateral (colapsados por padrão).
+    pub expanded_groups: Vec<String>,
 }
 
 impl Default for UiConfig {
@@ -74,6 +76,7 @@ impl Default for UiConfig {
             list_width: 320,
             fetch_favicons: false,
             sort_by: "title".to_owned(),
+            expanded_groups: Vec::new(),
         }
     }
 }

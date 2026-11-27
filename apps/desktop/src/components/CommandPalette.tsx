@@ -287,7 +287,13 @@ export function CommandPalette({
           )}
         >
           <span className="flex items-center gap-2.5 min-w-0">
-            <Avatar title={entry.title} url={entry.url} size="sm" />
+            <Avatar
+              title={entry.title}
+              url={entry.url}
+              iconId={entry.iconId}
+              customIconUuid={entry.customIconUuid}
+              size="sm"
+            />
             <span className="min-w-0">
               <span className="flex items-center gap-1.5">
                 <span className="font-medium text-fg truncate">{entry.title}</span>

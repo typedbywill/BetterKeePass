@@ -4,7 +4,6 @@ import { EyeOff } from 'lucide-react';
 import { CommandPalette } from './components/CommandPalette';
 import { EntryDetail } from './components/EntryDetail';
 import { EntryList } from './components/EntryList';
-import { EntryModal } from './components/EntryModal';
 import { HealthView } from './components/HealthView';
 import { SettingsView } from './components/SettingsView';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
@@ -28,6 +27,7 @@ export function App() {
     listWidth,
     faviconsEnabled,
     sortBy,
+    expandedGroups,
     configHydrated,
     clipboardClearSeconds,
     activeView,
@@ -68,11 +68,49 @@ export function App() {
 
   useEffect(() => {
     if (configQuery.data && !configHydrated) {
-      hydrateFromConfig(configQuery.data.ui, configQuery.data.clipboard.clearAfterSeconds);
+      hydrateFromConfig(
+        configQuery.data.ui,
+        configQuery.data.clipboard.clearAfterSeconds,
+        configQuery.data.managedByNix,
+      );
     }
   }, [configQuery.data, configHydrated, hydrateFromConfig]);
 
-  // Persist UI preferences to backend TOML with debounce when not managed by Nix.
+  // Persist discrete UI preferences immediately so toggles (e.g. favicons, expandedGroups)
+  // never race with backend checks or app shutdown.
+  useEffect(() => {
+    if (!configHydrated || configQuery.data?.managedByNix) return;
+    void api
+      .setUiConfig({
+        theme,
+        language,
+        presentationMode,
+        sidebarCollapsed,
+        listWidth,
+        fetchFavicons: faviconsEnabled,
+        sortBy,
+        expandedGroups,
+      })
+      .then(() => {
+        if (faviconsEnabled) {
+          void queryClient.invalidateQueries({ queryKey: ['favicon'] });
+        }
+      });
+  }, [
+    configHydrated,
+    configQuery.data?.managedByNix,
+    queryClient,
+    theme,
+    language,
+    presentationMode,
+    sidebarCollapsed,
+    faviconsEnabled,
+    sortBy,
+    expandedGroups,
+    // listWidth is intentionally excluded here and debounced below
+  ]);
+
+  // Debounce listWidth persistence separately while dragging the resize handle.
   useEffect(() => {
     if (!configHydrated || configQuery.data?.managedByNix) return;
     const timer = setTimeout(() => {
@@ -84,20 +122,11 @@ export function App() {
         listWidth,
         fetchFavicons: faviconsEnabled,
         sortBy,
+        expandedGroups,
       });
     }, 350);
     return () => clearTimeout(timer);
-  }, [
-    configHydrated,
-    configQuery.data?.managedByNix,
-    theme,
-    language,
-    presentationMode,
-    sidebarCollapsed,
-    listWidth,
-    faviconsEnabled,
-    sortBy,
-  ]);
+  }, [listWidth]);
 
   const allEntriesQuery = useQuery({
     queryKey: ['entries', ''],
@@ -276,7 +305,6 @@ export function App() {
       </div>
 
       <CommandPalette t={t} entries={allEntriesQuery.data ?? []} />
-      <EntryModal t={t} />
       <ShortcutsDialog t={t} />
       <AlertDialog
         isOpen={Boolean(deleteConfirmId)}

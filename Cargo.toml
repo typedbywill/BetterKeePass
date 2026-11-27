@@ -61,3 +61,7 @@ doc_markdown = "allow"
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+# KDF (Argon2) e criptografia precisam de otimização mesmo em dev, senão o desbloqueio leva dezenas de segundos.
+[profile.dev.package."*"]
+opt-level = 3

@@ -29,8 +29,19 @@ describe('BetterKeePass Desktop UI', () => {
     cleanup();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    localStorage.clear();
     document.documentElement.classList.remove('dark');
+    await api.setUiConfig({
+      theme: 'system',
+      language: 'pt-BR',
+      presentationMode: false,
+      sidebarCollapsed: false,
+      listWidth: 320,
+      fetchFavicons: false,
+      sortBy: 'title',
+      expandedGroups: [],
+    });
     useUiStore.setState({
       unlocked: false,
       theme: 'system',
@@ -41,6 +52,8 @@ describe('BetterKeePass Desktop UI', () => {
       sortBy: 'title',
       faviconsEnabled: false,
       configHydrated: false,
+      expandedGroups: [],
+      draggingEntryId: null,
       activeView: 'vault',
       groupFilter: 'all',
       selectedEntryId: null,
@@ -84,28 +97,29 @@ describe('BetterKeePass Desktop UI', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 
-  it('supports inline editing and calls api.updateEntry', async () => {
+  it('supports direct input editing and calls api.updateEntry on save', async () => {
     const spy = vi.spyOn(api, 'updateEntry');
     renderApp();
     await unlockDemoVault();
 
     fireEvent.click(screen.getByText('GitHub'));
     const detail = screen.getByRole('region', { name: 'Detalhes da entrada' });
+    const input = await within(detail).findByLabelText('Usuário');
+    const passwordInput = within(detail).getByLabelText('Senha');
     await waitFor(() => {
-      expect(within(detail).getByText('octocat')).toBeInTheDocument();
+      expect(input).toHaveValue('octocat');
+      expect(passwordInput).toHaveValue('Demo-GitHub-Pass!99');
     });
 
-    fireEvent.click(within(detail).getByText('octocat'));
-    const input = within(detail).getByLabelText('Usuário');
     fireEvent.change(input, { target: { value: 'hubot' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(within(detail).getByRole('button', { name: /Salvar entrada/i }));
 
     await waitFor(() => {
       expect(spy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', {
         username: 'hubot',
       });
     });
-    expect(await within(detail).findByText('hubot')).toBeInTheDocument();
+    expect(await within(detail).findByDisplayValue('hubot')).toBeInTheDocument();
     spy.mockRestore();
   });
 
@@ -127,13 +141,91 @@ describe('BetterKeePass Desktop UI', () => {
       expect(screen.getByText(/Limpeza em/i)).toBeInTheDocument();
     });
 
-    // Ctrl+N opens New Entry modal
+    // Ctrl+N opens New Entry inline form in the detail pane (same layout as view)
     fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
-    expect(screen.getByRole('dialog', { name: /Nova entrada/i })).toBeInTheDocument();
+    expect(within(detail).getByRole('button', { name: /Cancelar/i })).toBeInTheDocument();
+    expect(within(detail).getByLabelText('Título')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => {
+      expect(within(detail).queryByRole('button', { name: /Cancelar/i })).not.toBeInTheDocument();
+    });
 
     // ? opens Keyboard Shortcuts modal
     fireEvent.keyDown(window, { key: '?' });
     expect(screen.getByRole('dialog', { name: /Atalhos de teclado/i })).toBeInTheDocument();
+  });
+
+  it('keeps groups collapsed by default, toggles on click, and persists preference', async () => {
+    renderApp();
+    await unlockDemoVault();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Navegação do cofre' });
+    expect(within(sidebar).getByText('Desenvolvimento')).toBeInTheDocument();
+    expect(within(sidebar).queryByText('Infra')).not.toBeInTheDocument();
+
+    // Click to open group
+    fireEvent.click(within(sidebar).getByText('Desenvolvimento'));
+    await waitFor(() => {
+      expect(within(sidebar).getByText('Infra')).toBeInTheDocument();
+    });
+    expect(JSON.parse(localStorage.getItem('bkp.expandedGroups') ?? '[]')).toContain('g1');
+
+    // Click again to close group
+    fireEvent.click(within(sidebar).getByText('Desenvolvimento'));
+    await waitFor(() => {
+      expect(within(sidebar).queryByText('Infra')).not.toBeInTheDocument();
+    });
+    expect(JSON.parse(localStorage.getItem('bkp.expandedGroups') ?? '[]')).not.toContain('g1');
+  });
+
+  it('supports dragging an entry onto another folder to move it', async () => {
+    const moveSpy = vi.spyOn(api, 'moveEntry');
+    renderApp();
+    await unlockDemoVault();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Navegação do cofre' });
+    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const draggableRow = within(entryList).getByText('GitHub').closest('[draggable="true"]')!;
+    const targetFolder = within(sidebar).getByText('Pessoal').closest('[data-group-path]')!;
+
+    const dataTransfer = {
+      data: {} as Record<string, string>,
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData(type: string, val: string) {
+        this.data[type] = val;
+      },
+      getData(type: string) {
+        return this.data[type] ?? '';
+      },
+    };
+
+    fireEvent.dragStart(draggableRow, { dataTransfer });
+    fireEvent.dragOver(targetFolder, { dataTransfer });
+    fireEvent.drop(targetFolder, { dataTransfer });
+
+    await waitFor(() => {
+      expect(moveSpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'Pessoal');
+    });
+    expect(await screen.findByText(/Entrada movida para outra pasta/i)).toBeInTheDocument();
+    moveSpy.mockRestore();
+  });
+
+  it('creates a new folder from the sidebar hover + button', async () => {
+    const createGroupSpy = vi.spyOn(api, 'createGroup');
+    renderApp();
+    await unlockDemoVault();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Navegação do cofre' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Nova pasta' }));
+    const input = within(sidebar).getByPlaceholderText('Nome da pasta...');
+    fireEvent.change(input, { target: { value: 'Trabalho' } });
+    fireEvent.submit(input.closest('form')!);
+
+    await waitFor(() => {
+      expect(createGroupSpy).toHaveBeenCalledWith('Trabalho');
+    });
+    expect(await within(sidebar).findByText('Trabalho')).toBeInTheDocument();
+    createGroupSpy.mockRestore();
   });
 });
