@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import type { Language } from '../i18n';
 import type { UiConfig } from '../lib/tauri';
-import { isThemeMode, type ThemeMode } from '../lib/theme';
+import { isThemeMode, isThemePreset, type ThemeMode, type ThemePreset } from '../lib/theme';
 
-export type { ThemeMode };
+export type { ThemeMode, ThemePreset };
 export type ActiveView = 'vault' | 'health' | 'settings';
 export type GroupFilter = 'all' | 'passkeys' | 'trash' | { groupPath: string };
 export type SortBy = 'title' | 'recent';
@@ -67,6 +67,7 @@ interface UiState {
   unlocked: boolean;
   vaultPath: string;
   theme: ThemeMode;
+  themePreset: ThemePreset;
   language: Language;
   presentationMode: boolean;
   sidebarCollapsed: boolean;
@@ -89,6 +90,7 @@ interface UiState {
   recentVaults: string[];
   setUnlocked: (unlocked: boolean, vaultPath?: string) => void;
   setTheme: (theme: ThemeMode) => void;
+  setThemePreset: (themePreset: ThemePreset) => void;
   setLanguage: (language: Language) => void;
   togglePresentationMode: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -118,6 +120,7 @@ export const useUiStore = create<UiState>((set) => ({
   unlocked: false,
   vaultPath: '',
   theme: 'system',
+  themePreset: 'default',
   language: 'pt-BR',
   presentationMode: false,
   sidebarCollapsed: false,
@@ -146,6 +149,7 @@ export const useUiStore = create<UiState>((set) => ({
       activeView: 'vault',
     })),
   setTheme: (theme) => set({ theme }),
+  setThemePreset: (themePreset) => set({ themePreset }),
   setLanguage: (language) => set({ language }),
   togglePresentationMode: () =>
     set((state) => ({ presentationMode: !state.presentationMode })),
@@ -166,6 +170,10 @@ export const useUiStore = create<UiState>((set) => ({
       }
       return {
         theme: isThemeMode(ui.theme) ? ui.theme : state.theme,
+        themePreset:
+          ui.themePreset && isThemePreset(ui.themePreset)
+            ? ui.themePreset
+            : state.themePreset,
         language: ui.language === 'en' || ui.language === 'pt-BR' ? ui.language : state.language,
         presentationMode: Boolean(ui.presentationMode),
         sidebarCollapsed: Boolean(ui.sidebarCollapsed),

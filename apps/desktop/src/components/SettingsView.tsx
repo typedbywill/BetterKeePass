@@ -4,7 +4,7 @@ import type { Language } from '../i18n';
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
 import { api } from '../lib/tauri';
-import { CUSTOM_THEMES } from '../lib/theme';
+import { resolveDark, THEME_PRESETS } from '../lib/theme';
 import { useUiStore, type ThemeMode } from '../store/ui';
 import { Button, SegmentedControl, Switch } from '../ui';
 
@@ -13,6 +13,8 @@ export function SettingsView({ t }: { t: Translations }) {
   const {
     theme,
     setTheme,
+    themePreset,
+    setThemePreset,
     language,
     setLanguage,
     presentationMode,
@@ -32,6 +34,7 @@ export function SettingsView({ t }: { t: Translations }) {
   });
 
   const managed = configQuery.data?.managedByNix ?? false;
+  const previewDark = resolveDark(theme);
 
   async function handleRevoke(id: string) {
     await api.revokeBrowser(id);
@@ -96,16 +99,18 @@ export function SettingsView({ t }: { t: Translations }) {
                 aria-label={t.customThemesLabel}
                 className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3"
               >
-                {CUSTOM_THEMES.map((item) => {
-                  const active = theme === item.id;
-                  const [bg, surface, accent, fg] = item.swatches;
+                {THEME_PRESETS.map((item) => {
+                  const active = themePreset === item.id;
+                  const [bg, surface, accent, fg] = previewDark
+                    ? item.darkSwatches
+                    : item.lightSwatches;
                   return (
                     <button
                       key={item.id}
                       type="button"
                       disabled={managed}
                       aria-pressed={active}
-                      onClick={() => setTheme(item.id)}
+                      onClick={() => setThemePreset(item.id)}
                       className={cn(
                         'group flex flex-col gap-2 rounded-lg border p-2 text-left transition-colors outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-ring',
                         active

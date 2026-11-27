@@ -247,11 +247,7 @@ fn reveal_entry_password(state: State<'_, AppState>, uuid: String) -> Result<Str
 }
 
 #[tauri::command(async)]
-fn copy_entry_field(
-    state: State<'_, AppState>,
-    uuid: String,
-    field: String,
-) -> Result<(), String> {
+fn copy_entry_field(state: State<'_, AppState>, uuid: String, field: String) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     let clear_secs = state
         .config
@@ -283,7 +279,9 @@ fn copy_entry_field(
 #[tauri::command(async)]
 fn get_entry_totp(state: State<'_, AppState>, uuid: String) -> Result<OtpCode, String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
-    with_vault_mut(&state, |u| u.vault.totp_now(parsed).map_err(|e| e.to_string()))
+    with_vault_mut(&state, |u| {
+        u.vault.totp_now(parsed).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command(async)]
@@ -409,11 +407,7 @@ fn restore_history(state: State<'_, AppState>, uuid: String, index: usize) -> Re
 }
 
 #[tauri::command(async)]
-fn delete_entry(
-    state: State<'_, AppState>,
-    uuid: String,
-    permanent: bool,
-) -> Result<(), String> {
+fn delete_entry(state: State<'_, AppState>, uuid: String, permanent: bool) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
         u.vault
@@ -426,11 +420,7 @@ fn delete_entry(
 }
 
 #[tauri::command(async)]
-fn move_entry(
-    state: State<'_, AppState>,
-    uuid: String,
-    group_path: String,
-) -> Result<(), String> {
+fn move_entry(state: State<'_, AppState>, uuid: String, group_path: String) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
     with_vault_mut(&state, |u| {
         u.vault
@@ -471,14 +461,28 @@ fn create_group(state: State<'_, AppState>, group_path: String) -> Result<String
     })
 }
 
+#[tauri::command(async)]
+fn set_group_icon(
+    state: State<'_, AppState>,
+    group_path: String,
+    icon_id: usize,
+) -> Result<(), String> {
+    with_vault_mut(&state, |u| {
+        u.vault
+            .set_group_icon(&group_path, icon_id)
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
 fn extract_domain_from_url(raw_url: &str) -> Option<String> {
     let trimmed = raw_url.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let without_scheme = trimmed
-        .split_once("://")
-        .map_or(trimmed, |(_, rest)| rest);
+    let without_scheme = trimmed.split_once("://").map_or(trimmed, |(_, rest)| rest);
     let authority = without_scheme.split(['/', '?', '#']).next()?;
     let host_port = authority.rsplit('@').next()?;
     let host = host_port.split(':').next()?;
@@ -490,12 +494,11 @@ async fn fetch_favicon_from_url(url: String) -> Result<String, String> {
     let clean_domain = extract_domain_from_url(&url)
         .ok_or_else(|| "URL inválida ou domínio não público".to_owned())?;
 
-    let (bytes, mime) = tauri::async_runtime::spawn_blocking(move || {
-        fetch_favicon_for_domain(&clean_domain)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .ok_or_else(|| "não foi possível baixar o ícone desta URL".to_owned())?;
+    let (bytes, mime) =
+        tauri::async_runtime::spawn_blocking(move || fetch_favicon_for_domain(&clean_domain))
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "não foi possível baixar o ícone desta URL".to_owned())?;
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{encoded}"))
@@ -593,8 +596,7 @@ fn detect_icon_mime(bytes: &[u8]) -> Option<&'static str> {
         Some("image/x-icon")
     } else {
         let trimmed = std::str::from_utf8(bytes).ok()?.trim_start();
-        if trimmed.starts_with("<svg")
-            || (trimmed.starts_with("<?xml") && trimmed.contains("<svg"))
+        if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && trimmed.contains("<svg"))
         {
             Some("image/svg+xml")
         } else {
@@ -607,10 +609,16 @@ fn fetch_icon_bytes(agent: &ureq::Agent, url: &str) -> Option<(Vec<u8>, &'static
     let response = agent
         .get(url)
         .header("User-Agent", "Mozilla/5.0 (compatible; BetterKeePass/0.1)")
-        .header("Accept", "image/png,image/svg+xml,image/x-icon,image/*;q=0.8")
+        .header(
+            "Accept",
+            "image/png,image/svg+xml,image/x-icon,image/*;q=0.8",
+        )
         .call()
         .ok()?;
-    if let Some(ct) = response.headers().get("content-type").and_then(|v| v.to_str().ok())
+    if let Some(ct) = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
         && ct.to_ascii_lowercase().starts_with("text/html")
     {
         return None;
@@ -648,10 +656,7 @@ fn fetch_favicon_for_domain(clean_domain: &str) -> Option<(Vec<u8>, &'static str
 }
 
 #[tauri::command]
-async fn get_favicon(
-    state: State<'_, AppState>,
-    domain: String,
-) -> Result<Option<String>, String> {
+async fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<String>, String> {
     let enabled = state
         .config
         .lock()
@@ -748,14 +753,16 @@ pub fn run() {
 
     if lock_secs > 0 {
         let watcher_session = Arc::clone(&session);
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
-            if let Ok(mut guard) = watcher_session.lock()
-                && let Some(unlocked) = guard.as_ref()
-                && !unlocked.keep_open
-                && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
-            {
-                *guard = None;
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                if let Ok(mut guard) = watcher_session.lock()
+                    && let Some(unlocked) = guard.as_ref()
+                    && !unlocked.keep_open
+                    && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
+                {
+                    *guard = None;
+                }
             }
         });
     }
@@ -788,6 +795,7 @@ pub fn run() {
             move_entry,
             get_custom_icon,
             create_group,
+            set_group_icon,
             fetch_favicon_from_url,
             generate_password_cmd,
             generate_passphrase_cmd,

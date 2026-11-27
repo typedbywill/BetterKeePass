@@ -16,7 +16,7 @@ import {
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
 import { api, type EntrySummary } from '../lib/tauri';
-import { CUSTOM_THEMES } from '../lib/theme';
+import { THEME_PRESETS } from '../lib/theme';
 import { useUiStore } from '../store/ui';
 import { Avatar, Badge, Dialog, Kbd } from '../ui';
 
@@ -63,6 +63,7 @@ export function CommandPalette({
     setEntryModalOpen,
     setShortcutsOpen,
     setTheme,
+    setThemePreset,
     setUnlocked,
     presentationMode,
     clipboardClearSeconds,
@@ -153,13 +154,13 @@ export function CommandPalette({
           setCommandPaletteOpen(false);
         },
       },
-      ...CUSTOM_THEMES.map((customTheme) => ({
+      ...THEME_PRESETS.map((preset) => ({
         kind: 'command' as const,
-        id: `theme-${customTheme.id}`,
-        label: `${t.themeLabel}: ${customTheme.name}`,
+        id: `theme-preset-${preset.id}`,
+        label: `${t.themeLabel}: ${preset.name}`,
         icon: <Palette className="h-3.5 w-3.5" aria-hidden="true" />,
         run: () => {
-          setTheme(customTheme.id);
+          setThemePreset(preset.id);
           setCommandPaletteOpen(false);
         },
       })),
@@ -195,6 +196,7 @@ export function CommandPalette({
       togglePresentationMode,
       setActiveView,
       setTheme,
+      setThemePreset,
       setShortcutsOpen,
       setUnlocked,
     ],

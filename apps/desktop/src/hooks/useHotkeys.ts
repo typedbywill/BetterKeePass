@@ -10,6 +10,8 @@ export interface HotkeyHandlers {
   onCopyPassword: () => void;
   onCopyUsername: () => void;
   onCopyTotp: () => void;
+  onCopyUrl: () => void;
+  onOpenUrl: () => void;
   onNewEntry: () => void;
   onEditEntry: () => void;
   onDeleteEntry: () => void;
@@ -67,9 +69,19 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
         handlers.onTogglePresentation();
         return;
       }
-      if (mod && event.shiftKey && key === 'c') {
+      if ((mod && event.shiftKey && key === 'c') || (mod && !event.shiftKey && key === 't')) {
         event.preventDefault();
         handlers.onCopyTotp();
+        return;
+      }
+      if (mod && !event.shiftKey && key === 'u') {
+        event.preventDefault();
+        handlers.onCopyUrl();
+        return;
+      }
+      if (mod && !event.shiftKey && key === 'o') {
+        event.preventDefault();
+        handlers.onOpenUrl();
         return;
       }
       if (mod && !event.shiftKey && key === 'b') {

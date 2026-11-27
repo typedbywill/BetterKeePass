@@ -72,6 +72,7 @@ export interface HealthReport {
 
 export interface UiConfig {
   theme: string;
+  themePreset?: string;
   language: string;
   presentationMode: boolean;
   sidebarCollapsed: boolean;
@@ -172,6 +173,7 @@ const mockEntries: (EntryDetailsView & { _secret: string })[] = [
 ];
 
 const mockExtraGroups: string[] = [];
+const mockGroupIcons = new Map<string, number>();
 
 const mockHistory = new Map<
   string,
@@ -183,6 +185,7 @@ let mockConfig: AppConfig = {
   clipboard: { clearAfterSeconds: 15 },
   ui: {
     theme: 'system',
+    themePreset: 'default',
     language: 'pt-BR',
     presentationMode: false,
     sidebarCollapsed: false,
@@ -312,6 +315,12 @@ export const api = {
         cur = found;
       }
     }
+    const applyIcons = (group: GroupNode) => {
+      const icon = mockGroupIcons.get(group.path);
+      if (icon !== undefined) group.iconId = icon;
+      group.children.forEach(applyIcons);
+    };
+    applyIcons(base);
     return base;
   },
   async getEntryDetails(uuid: string): Promise<EntryDetailsView> {
@@ -485,6 +494,10 @@ export const api = {
       mockExtraGroups.push(clean);
     }
     return `mock-${clean}`;
+  },
+  async setGroupIcon(groupPath: string, iconId: number): Promise<void> {
+    if (hasTauri()) return invoke('set_group_icon', { groupPath, iconId });
+    mockGroupIcons.set(groupPath, iconId);
   },
   async fetchFaviconFromUrl(url: string): Promise<string> {
     if (hasTauri()) {

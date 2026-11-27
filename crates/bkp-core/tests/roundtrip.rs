@@ -59,15 +59,32 @@ fn roundtrip_kdbx4_with_passkey_attributes_and_totp() {
         .unwrap();
 
     let master_pw = SecretString::from("master-pass-123".to_owned());
+    vault.set_group_icon("Contas/GitHub", 42).unwrap();
+    assert!(vault.set_group_icon("Contas/GitHub", 69).is_err());
     vault.save(&db_path, Some(master_pw.clone()), None).unwrap();
 
     let mut reopened = Vault::open(&db_path, Some(master_pw), None).unwrap();
     assert_eq!(reopened.database_name(), Some("BetterKeePass Test"));
+    let tree = reopened.group_tree();
+    let contas = tree.children.iter().find(|g| g.name == "Contas").unwrap();
+    assert_eq!(
+        contas
+            .children
+            .iter()
+            .find(|g| g.name == "GitHub")
+            .unwrap()
+            .icon_id,
+        Some(42)
+    );
 
     let found = reopened.find_by_path("Contas/GitHub/GitHub").unwrap();
     assert_eq!(found.uuid, uuid);
     assert_eq!(found.username, "octocat");
     assert_eq!(found.tags, vec!["Passkey", "Dev"]);
+    assert!(found.has_password);
+    assert!(found.has_otp);
+    assert!(found.has_passkey);
+    assert!(found.has_notes);
 
     let history = reopened.entry_history(uuid).unwrap();
     assert_eq!(history.len(), 1);

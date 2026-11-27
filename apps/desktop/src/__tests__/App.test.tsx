@@ -35,6 +35,7 @@ describe('BetterKeePass Desktop UI', () => {
     document.documentElement.removeAttribute('data-theme');
     await api.setUiConfig({
       theme: 'system',
+      themePreset: 'default',
       language: 'pt-BR',
       presentationMode: false,
       sidebarCollapsed: false,
@@ -46,6 +47,7 @@ describe('BetterKeePass Desktop UI', () => {
     useUiStore.setState({
       unlocked: false,
       theme: 'system',
+      themePreset: 'default',
       language: 'pt-BR',
       presentationMode: false,
       sidebarCollapsed: false,
@@ -72,9 +74,8 @@ describe('BetterKeePass Desktop UI', () => {
     await unlockDemoVault();
 
     fireEvent.click(screen.getByText('GitHub'));
-    await waitFor(() => {
-      expect(screen.getByText('octocat')).toBeInTheDocument();
-    });
+    const detail = screen.getByRole('region', { name: 'Detalhes da entrada' });
+    await within(detail).findByLabelText('Usuário');
 
     fireEvent.click(screen.getByRole('button', { name: /Modo apresentação/i }));
     expect(
@@ -179,6 +180,18 @@ describe('BetterKeePass Desktop UI', () => {
     expect(JSON.parse(localStorage.getItem('bkp.expandedGroups') ?? '[]')).not.toContain('g1');
   });
 
+  it('changes a group icon through its context menu', async () => {
+    const iconSpy = vi.spyOn(api, 'setGroupIcon');
+    renderApp();
+    await unlockDemoVault();
+    fireEvent.contextMenu(screen.getByText('Desenvolvimento'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Alterar ícone' }));
+    const dialog = screen.getByRole('dialog', { name: 'Alterar ícone' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ícone 42' }));
+    await waitFor(() => expect(iconSpy).toHaveBeenCalledWith('Desenvolvimento', 42));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Alterar ícone' })).not.toBeInTheDocument());
+  });
+
   it('supports dragging an entry onto another folder to move it', async () => {
     const moveSpy = vi.spyOn(api, 'moveEntry');
     renderApp();
@@ -263,7 +276,7 @@ describe('BetterKeePass Desktop UI', () => {
     updateSpy.mockRestore();
   });
 
-  it('applies custom themes in Settings and sets data-theme and .dark appropriately', async () => {
+  it('applies custom themes in Settings and preserves preset when toggling light/dark', async () => {
     renderApp();
     await unlockDemoVault();
 
@@ -272,20 +285,36 @@ describe('BetterKeePass Desktop UI', () => {
     const tokyoNightBtn = await screen.findByRole('button', { name: 'Tokyo Night' });
     fireEvent.click(tokyoNightBtn);
     expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(tokyoNightBtn).toHaveAttribute('aria-pressed', 'true');
 
-    const latteBtn = screen.getByRole('button', { name: 'Catppuccin Latte' });
-    fireEvent.click(latteBtn);
-    expect(document.documentElement.getAttribute('data-theme')).toBe('catppuccin-latte');
-    expect(document.documentElement.classList.contains('dark')).toBe(false);
-    expect(latteBtn).toHaveAttribute('aria-pressed', 'true');
-
     const settings = screen.getByRole('region', { name: 'Configurações' });
-    const lightRadio = within(settings).getByRole('radio', { name: 'Claro' });
-    fireEvent.click(lightRadio);
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    fireEvent.click(within(settings).getByRole('radio', { name: 'Escuro' }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+
+    fireEvent.click(within(settings).getByRole('radio', { name: 'Claro' }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    const grafiteBtn = screen.getByRole('button', { name: 'Grafite' });
+    fireEvent.click(grafiteBtn);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('grafite');
+    expect(grafiteBtn).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(async () => expect((await api.getConfig()).ui.themePreset).toBe('grafite'));
+    fireEvent.click(within(settings).getByRole('radio', { name: 'Escuro' }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('grafite');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    fireEvent.click(within(settings).getByRole('radio', { name: 'Claro' }));
+
+    const catppuccinBtn = screen.getByRole('button', { name: 'Catppuccin' });
+    fireEvent.click(catppuccinBtn);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('catppuccin');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(catppuccinBtn).toHaveAttribute('aria-pressed', 'true');
+
+    const defaultBtn = screen.getByRole('button', { name: 'BetterKeePass' });
+    fireEvent.click(defaultBtn);
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
   it('displays minimalist icon indicators for entry fields in the entry list', async () => {
@@ -308,5 +337,38 @@ describe('BetterKeePass Desktop UI', () => {
     expect(within(protonRow).getByLabelText('URL')).toBeInTheDocument();
     expect(within(protonRow).queryByLabelText('TOTP')).not.toBeInTheDocument();
     expect(within(protonRow).queryByLabelText('Passkey')).not.toBeInTheDocument();
+  });
+
+  it('handles Ctrl+T, Ctrl+U, and Ctrl+O shortcuts for selected entry', async () => {
+    const copySpy = vi.spyOn(api, 'copySecret');
+    const writeTextSpy = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextSpy },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderApp();
+    await unlockDemoVault();
+
+    fireEvent.click(screen.getByText('GitHub'));
+    const detail = screen.getByRole('region', { name: 'Detalhes da entrada' });
+    await within(detail).findByLabelText('Usuário');
+
+    fireEvent.keyDown(window, { key: 't', ctrlKey: true });
+    await waitFor(() => {
+      expect(copySpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'totp');
+    });
+
+    fireEvent.keyDown(window, { key: 'u', ctrlKey: true });
+    await waitFor(() => {
+      expect(writeTextSpy).toHaveBeenCalledWith('https://github.com');
+    });
+    expect(await screen.findByText('URL copiada')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true });
+    expect(openSpy).toHaveBeenCalledWith('https://github.com', '_blank', 'noopener,noreferrer');
+
+    copySpy.mockRestore();
+    openSpy.mockRestore();
   });
 });

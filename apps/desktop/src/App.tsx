@@ -21,6 +21,7 @@ export function App() {
   const {
     unlocked,
     theme,
+    themePreset,
     language,
     presentationMode,
     sidebarCollapsed,
@@ -55,10 +56,10 @@ export function App() {
   const detailRef = useRef<HTMLElement | null>(null);
   const [editRequestNonce, setEditRequestNonce] = useState(0);
 
-  // Apply theme for both UnlockScreen and unlocked shell, reacting to OS theme changes.
+  // Apply theme mode & preset for both UnlockScreen and unlocked shell, reacting to OS theme changes.
   useEffect(() => {
-    return subscribeSystemTheme(theme);
-  }, [theme]);
+    return subscribeSystemTheme(theme, themePreset);
+  }, [theme, themePreset]);
 
   const configQuery = useQuery({
     queryKey: ['app-config'],
@@ -87,6 +88,7 @@ export function App() {
     void api
       .setUiConfig({
         theme,
+        themePreset,
         language,
         presentationMode,
         sidebarCollapsed,
@@ -105,6 +107,7 @@ export function App() {
     configQuery.data?.managedByNix,
     queryClient,
     theme,
+    themePreset,
     language,
     presentationMode,
     sidebarCollapsed,
@@ -120,6 +123,7 @@ export function App() {
     const timer = setTimeout(() => {
       void api.setUiConfig({
         theme,
+        themePreset,
         language,
         presentationMode,
         sidebarCollapsed,
@@ -213,6 +217,31 @@ export function App() {
     [selectedEntryId, pushToast, t, clipboardClearSeconds],
   );
 
+  const selectedEntry = useMemo(
+    () =>
+      visibleEntries.find((entry) => entry.uuid === selectedEntryId) ??
+      allEntriesQuery.data?.find((entry) => entry.uuid === selectedEntryId) ??
+      null,
+    [visibleEntries, allEntriesQuery.data, selectedEntryId],
+  );
+
+  const copySelectedUrl = useCallback(async () => {
+    if (!selectedEntry?.url) return;
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(selectedEntry.url);
+    }
+    pushToast({
+      kind: 'clipboard',
+      title: t.copiedUrlToast,
+      clearAfterSeconds: clipboardClearSeconds,
+    });
+  }, [selectedEntry, pushToast, t, clipboardClearSeconds]);
+
+  const openSelectedUrl = useCallback(() => {
+    if (!selectedEntry?.url) return;
+    window.open(selectedEntry.url, '_blank', 'noopener,noreferrer');
+  }, [selectedEntry]);
+
   useHotkeys({
     enabled: unlocked,
     hasOpenModal:
@@ -224,6 +253,8 @@ export function App() {
     onCopyPassword: () => void copySelected('password'),
     onCopyUsername: () => void copySelected('username'),
     onCopyTotp: () => void copySelected('totp'),
+    onCopyUrl: () => void copySelectedUrl(),
+    onOpenUrl: openSelectedUrl,
     onNewEntry: () => setEntryModalOpen(true),
     onEditEntry: () => {
       if (selectedEntryId) setEditRequestNonce((n) => n + 1);

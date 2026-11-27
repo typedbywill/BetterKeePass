@@ -1,8 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'framer-motion';
 import {
-  ChevronDown,
   ChevronRight,
   EyeOff,
   Folder,
@@ -27,7 +27,7 @@ import { cn } from '../lib/cn';
 import { getKeepassIcon } from '../lib/keepassIcons';
 import { api, type GroupNode } from '../lib/tauri';
 import { useUiStore, type ThemeMode } from '../store/ui';
-import { IconButton, Kbd, SegmentedControl, Tooltip } from '../ui';
+import { Dialog, IconButton, Kbd, SegmentedControl, Tooltip } from '../ui';
 
 interface NavRowProps {
   active: boolean;
@@ -37,6 +37,25 @@ interface NavRowProps {
   count?: number;
   shortcut?: string;
   onClick: () => void;
+}
+
+function GroupChildren({ children }: { children: ReactNode }) {
+  const isPresent = useIsPresent();
+  const reducedMotion = useReducedMotion();
+
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: reducedMotion ? 0 : 0.2, ease: 'easeOut' }}
+      className="overflow-hidden"
+      aria-hidden={!isPresent || undefined}
+      inert={!isPresent || undefined}
+    >
+      <ul className="flex flex-col gap-0.5 mt-0.5">{children}</ul>
+    </motion.div>
+  );
 }
 
 function NavRow({
@@ -61,9 +80,7 @@ function NavRow({
       )}
     >
       {active && (
-        <motion.span
-          layoutId="sidebar-active"
-          transition={{ duration: 0.16, ease: 'easeOut' }}
+        <span
           className="absolute inset-0 rounded-md bg-surface shadow-xs border border-border -z-0"
         />
       )}
@@ -215,6 +232,8 @@ function GroupTreeItem({
   } = useUiStore();
   const [isDragOver, setIsDragOver] = useState(false);
   const [creatingChild, setCreatingChild] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [iconDialogOpen, setIconDialogOpen] = useState(false);
   const dragDepthRef = useRef(0);
 
   const visibleChildren = node.children.filter((c) => !c.isRecycleBin);
@@ -243,10 +262,25 @@ function GroupTreeItem({
     pushToast({ kind: 'success', title: t.groupCreatedToast });
   }
 
+  async function handleGroupIcon(iconId: number) {
+    try {
+      await api.setGroupIcon(node.path, iconId);
+      await queryClient.invalidateQueries({ queryKey: ['group-tree'] });
+      setIconDialogOpen(false);
+      pushToast({ kind: 'success', title: t.iconUpdatedToast });
+    } catch {
+      pushToast({ kind: 'danger', title: t.groupIconError });
+    }
+  }
+
   return (
     <li>
       <div
         data-group-path={node.path}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenu({ x: Math.min(e.clientX, window.innerWidth - 180), y: Math.min(e.clientY, window.innerHeight - 48) });
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
@@ -280,9 +314,7 @@ function GroupTreeItem({
         style={{ paddingLeft: `${8 + depth * 12}px` }}
       >
         {isActive && (
-          <motion.span
-            layoutId="sidebar-active"
-            transition={{ duration: 0.16, ease: 'easeOut' }}
+          <span
             className="absolute inset-0 rounded-md bg-surface shadow-xs border border-border -z-0"
           />
         )}
@@ -297,11 +329,7 @@ function GroupTreeItem({
             aria-expanded={expanded}
             className="relative z-10 inline-flex h-5 w-4 items-center justify-center text-fg-subtle hover:text-fg cursor-pointer"
           >
-            {expanded ? (
-              <ChevronDown className="h-3 w-3" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="h-3 w-3" aria-hidden="true" />
-            )}
+            <ChevronRight className={cn('h-3 w-3 transition-transform duration-200 motion-reduce:transition-none', expanded && 'rotate-90')} aria-hidden="true" />
           </button>
         ) : (
           <span className="w-4 shrink-0" aria-hidden="true" />
@@ -346,13 +374,32 @@ function GroupTreeItem({
           onCancel={() => setCreatingChild(false)}
         />
       )}
-      {hasChildren && expanded && (
-        <ul className="flex flex-col gap-0.5 mt-0.5">
-          {visibleChildren.map((child) => (
-            <GroupTreeItem key={child.uuid} t={t} node={child} depth={depth + 1} />
-          ))}
-        </ul>
+      <AnimatePresence initial={false}>
+        {hasChildren && expanded && (
+          <GroupChildren key="children">
+            {visibleChildren.map((child) => (
+              <GroupTreeItem key={child.uuid} t={t} node={child} depth={depth + 1} />
+            ))}
+          </GroupChildren>
+        )}
+      </AnimatePresence>
+      {contextMenu && createPortal(
+        <div className="fixed inset-0 z-50" onMouseDown={() => setContextMenu(null)} onKeyDown={(e) => { if (e.key === 'Escape') setContextMenu(null); }}>
+          <div role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} className="fixed min-w-44 rounded-lg border border-border-strong bg-surface p-1 shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+            <button autoFocus type="button" role="menuitem" className="w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-fg hover:bg-surface-hover focus:bg-surface-hover outline-none" onClick={() => { setContextMenu(null); setIconDialogOpen(true); }}>
+              {t.changeIcon}
+            </button>
+          </div>
+        </div>, document.body,
       )}
+      <Dialog isOpen={iconDialogOpen} onOpenChange={setIconDialogOpen} title={t.changeIcon} closeLabel={t.close} size="sm">
+        <div className="grid grid-cols-8 gap-1 p-4 max-h-80 overflow-y-auto">
+          {Array.from({ length: 69 }, (_, iconId) => {
+            const Icon = getKeepassIcon(iconId);
+            return Icon && <button key={iconId} type="button" aria-label={`${t.builtinIconNumber} ${iconId}`} aria-pressed={node.iconId === iconId} title={`${t.builtinIconNumber} ${iconId}`} onClick={() => void handleGroupIcon(iconId)} className={cn('flex h-9 w-9 items-center justify-center rounded-md hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring outline-none', node.iconId === iconId && 'bg-accent-subtle text-accent')}><Icon className="h-4 w-4" aria-hidden="true" /></button>;
+          })}
+        </div>
+      </Dialog>
     </li>
   );
 }
@@ -410,7 +457,7 @@ export function Sidebar({
     <aside
       aria-label="Navegação do cofre"
       className={cn(
-        'shrink-0 border-r border-border bg-bg-subtle flex flex-col justify-between transition-[width] duration-150 ease-out select-none',
+        'shrink-0 border-r border-border bg-bg-subtle flex flex-col justify-between select-none overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none',
         sidebarCollapsed ? 'w-14 p-2' : 'w-60 p-3',
       )}
     >

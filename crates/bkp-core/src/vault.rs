@@ -285,6 +285,23 @@ impl Vault {
         Ok(self.ensure_group_path(Some(group_path)).uuid())
     }
 
+    /// Altera o ícone padrão de um grupo existente.
+    pub fn set_group_icon(&mut self, group_path: &str, icon_id: usize) -> Result<()> {
+        let segments = normalize_group_segments(Some(group_path));
+        if segments.is_empty() || icon_id > 68 {
+            return Err(CoreError::InvalidInput(
+                "grupo ou ícone inválido".to_owned(),
+            ));
+        }
+        let group_id = self.resolve_group_id(&segments)?;
+        let mut group = self
+            .db
+            .group_mut(group_id)
+            .ok_or_else(|| CoreError::GroupNotFound(segments.join("/")))?;
+        group.set_icon_builtin(icon_id);
+        Ok(())
+    }
+
     /// Remove um grupo (exceto a raiz) e todo o seu conteúdo.
     pub fn delete_group(&mut self, group_path: &str) -> Result<()> {
         let segments = normalize_group_segments(Some(group_path));

@@ -50,6 +50,8 @@ impl Default for ClipboardConfig {
 pub struct UiConfig {
     /// Tema inicial (`system`, `light` ou `dark`).
     pub theme: String,
+    /// Paleta de cores selecionada (`default`, `tokyo-night`, `catppuccin`, etc.).
+    pub theme_preset: String,
     /// Idioma inicial (`pt-BR` ou `en`).
     pub language: String,
     /// Iniciar em modo apresentação.
@@ -70,6 +72,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: "system".to_owned(),
+            theme_preset: "default".to_owned(),
             language: "pt-BR".to_owned(),
             presentation_mode: false,
             sidebar_collapsed: false,

@@ -21,7 +21,9 @@ export function ShortcutsDialog({ t }: { t: Translations }) {
       items: [
         { keys: ['Ctrl+C'], label: t.shortcutCopyPassword },
         { keys: ['Ctrl+B'], label: t.shortcutCopyUsername },
-        { keys: ['Ctrl+Shift+C'], label: t.shortcutCopyTotp },
+        { keys: ['Ctrl+T', 'Ctrl+Shift+C'], label: t.shortcutCopyTotp },
+        { keys: ['Ctrl+U'], label: t.shortcutCopyUrl },
+        { keys: ['Ctrl+O'], label: t.shortcutOpenUrl },
         { keys: ['Ctrl+N'], label: t.shortcutNewEntry },
         { keys: ['E', 'F2'], label: t.shortcutEdit },
         { keys: ['Del'], label: t.shortcutDelete },
