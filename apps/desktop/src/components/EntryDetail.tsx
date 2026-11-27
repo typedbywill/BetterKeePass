@@ -10,16 +10,21 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
   Folder,
   Globe,
   History,
+  Lock,
   MoreHorizontal,
   Paperclip,
+  Plus,
   RotateCcw,
   ShieldCheck,
   Tag,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import type { Translations } from '../i18n/pt-BR';
 import { getKeepassIcon } from '../lib/keepassIcons';
@@ -102,6 +107,7 @@ export function EntryDetail({
 
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const iconFileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   const [totpRemaining, setTotpRemaining] = useState<number>(30);
   const [showCustomFields, setShowCustomFields] = useState(true);
@@ -122,6 +128,16 @@ export function EntryDetail({
   const [passwordDraft, setPasswordDraft] = useState('');
   const [urlDraft, setUrlDraft] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
+  const [customFieldsDraft, setCustomFieldsDraft] = useState<
+    Array<{ name: string; value: string; protected: boolean; dirty?: boolean }>
+  >([]);
+  const [removedCustomFields, setRemovedCustomFields] = useState<string[]>([]);
+  const [addingField, setAddingField] = useState(false);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldValue, setNewFieldValue] = useState('');
+  const [newFieldProtected, setNewFieldProtected] = useState(false);
+  const [revealedCustomFields, setRevealedCustomFields] = useState<Record<string, string>>({});
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const detailsQuery = useQuery({
@@ -159,6 +175,13 @@ export function EntryDetail({
     setPasswordDraft('');
     setUrlDraft('');
     setNotesDraft('');
+    setCustomFieldsDraft([]);
+    setRemovedCustomFields([]);
+    setAddingField(false);
+    setNewFieldName('');
+    setNewFieldValue('');
+    setNewFieldProtected(false);
+    setRevealedCustomFields({});
     setIconDraft(null);
   }, [entryModalOpen, groupFilter]);
 
@@ -166,6 +189,9 @@ export function EntryDetail({
   useEffect(() => {
     setPasswordDraft('');
     setIconDraft(null);
+    setRemovedCustomFields([]);
+    setAddingField(false);
+    setRevealedCustomFields({});
   }, [selectedEntryId]);
 
   // Hydrate drafts from fetched entry details
@@ -178,6 +204,15 @@ export function EntryDetail({
     setUsernameDraft(d.summary.username);
     setUrlDraft(d.summary.url);
     setNotesDraft(d.notes);
+    setCustomFieldsDraft(
+      d.customFields.map((f) => ({
+        name: f.name,
+        value: f.value ?? '',
+        protected: f.protected,
+        dirty: false,
+      })),
+    );
+    setRemovedCustomFields([]);
   }, [detailsQuery.data, entryModalOpen]);
 
   // Hydrate password draft from fetched entry password
@@ -347,6 +382,9 @@ export function EntryDetail({
   const passwordDirty =
     !entryModalOpen && !presentationMode && passwordQuery.data !== undefined && passwordDraft !== loadedPassword;
 
+  const customFieldsDirty =
+    removedCustomFields.length > 0 || customFieldsDraft.some((f) => Boolean(f.dirty));
+
   const isViewDirty = Boolean(
     details &&
       (titleDraft.trim() !== details.summary.title ||
@@ -355,7 +393,8 @@ export function EntryDetail({
         notesDraft !== details.notes ||
         parseTags(tagsDraft).join(',') !== details.summary.tags.join(',') ||
         passwordDirty ||
-        iconDraft !== null),
+        iconDraft !== null ||
+        customFieldsDirty),
   );
 
   async function handleSave(e?: FormEvent) {
@@ -374,6 +413,11 @@ export function EntryDetail({
           tags: parseTags(tagsDraft),
           iconId: iconDraft?.kind === 'builtin' ? iconDraft.iconId : undefined,
           customIconBase64: iconDraft?.kind === 'custom' ? iconDraft.dataUrl : undefined,
+          customFields: customFieldsDraft.map((f) => ({
+            name: f.name,
+            value: f.value,
+            protected: f.protected,
+          })),
         });
         setIconDraft(null);
         setEntryModalOpen(false);
@@ -413,6 +457,17 @@ export function EntryDetail({
       patch.customIconBase64 = iconDraft.dataUrl;
     } else if (iconDraft?.kind === 'builtin') {
       patch.iconId = iconDraft.iconId;
+    }
+    const dirtyFields = customFieldsDraft.filter((f) => f.dirty);
+    if (dirtyFields.length > 0) {
+      patch.customFields = dirtyFields.map((f) => ({
+        name: f.name,
+        value: f.value,
+        protected: f.protected,
+      }));
+    }
+    if (removedCustomFields.length > 0) {
+      patch.removeCustomFields = removedCustomFields;
     }
     if (Object.keys(patch).length > 0) {
       updateMutation.mutate({ uuid, patch });
@@ -911,50 +966,333 @@ export function EntryDetail({
           )}
         </div>
 
-        {/* Custom fields — seção aberta sem card */}
-        {!entryModalOpen && details && details.customFields.length > 0 && (
-          <div className="border-t border-border/70 pt-4 flex flex-col gap-2">
+        {/* Custom fields — seção interativa */}
+        <div className="border-t border-border/70 pt-4 flex flex-col gap-2.5">
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={() => setShowCustomFields((v) => !v)}
-              className="w-full flex items-center justify-between py-1 text-xs font-semibold text-fg hover:text-accent transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 py-1 text-xs font-semibold text-fg hover:text-accent transition-colors cursor-pointer"
             >
-              <span>
-                {t.customFields} ({details.customFields.length})
-              </span>
               {showCustomFields ? (
                 <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
               ) : (
                 <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" aria-hidden="true" />
               )}
+              <span>
+                {t.customFields} ({customFieldsDraft.length})
+              </span>
             </button>
-            {showCustomFields && (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              onPress={() => {
+                setShowCustomFields(true);
+                setAddingField(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              {t.addCustomField}
+            </Button>
+          </div>
+
+          {showCustomFields && (
+            <div className="flex flex-col gap-2">
+              {addingField && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-subtle p-2.5">
+                  <Input
+                    autoFocus
+                    value={newFieldName}
+                    onChange={(e) => setNewFieldName(e.target.value)}
+                    placeholder={t.customFieldName}
+                    aria-label={t.customFieldName}
+                    className="flex-1 min-w-32 font-mono text-xs"
+                  />
+                  <Input
+                    type={newFieldProtected ? 'password' : 'text'}
+                    value={newFieldValue}
+                    onChange={(e) => setNewFieldValue(e.target.value)}
+                    placeholder={t.customFieldValue}
+                    aria-label={t.customFieldValue}
+                    className="flex-1 min-w-32 font-mono text-xs"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const cleanName = newFieldName.trim();
+                        if (!cleanName) return;
+                        setCustomFieldsDraft((prev) => [
+                          ...prev.filter((f) => f.name !== cleanName),
+                          {
+                            name: cleanName,
+                            value: newFieldValue,
+                            protected: newFieldProtected,
+                            dirty: true,
+                          },
+                        ]);
+                        setRemovedCustomFields((prev) => prev.filter((n) => n !== cleanName));
+                        setNewFieldName('');
+                        setNewFieldValue('');
+                        setNewFieldProtected(false);
+                        setAddingField(false);
+                      } else if (e.key === 'Escape') {
+                        setAddingField(false);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-pressed={newFieldProtected}
+                    title={t.customFieldProtected}
+                    onClick={() => setNewFieldProtected((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                      newFieldProtected
+                        ? 'border-accent bg-accent-subtle text-accent'
+                        : 'border-border bg-surface text-fg-muted hover:text-fg'
+                    }`}
+                  >
+                    <Lock className="h-3 w-3" aria-hidden="true" />
+                    {t.customFieldProtected}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="primary"
+                      onPress={() => {
+                        const cleanName = newFieldName.trim();
+                        if (!cleanName) return;
+                        setCustomFieldsDraft((prev) => [
+                          ...prev.filter((f) => f.name !== cleanName),
+                          {
+                            name: cleanName,
+                            value: newFieldValue,
+                            protected: newFieldProtected,
+                            dirty: true,
+                          },
+                        ]);
+                        setRemovedCustomFields((prev) => prev.filter((n) => n !== cleanName));
+                        setNewFieldName('');
+                        setNewFieldValue('');
+                        setNewFieldProtected(false);
+                        setAddingField(false);
+                      }}
+                    >
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onPress={() => {
+                        setAddingField(false);
+                        setNewFieldName('');
+                        setNewFieldValue('');
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {customFieldsDraft.length > 0 ? (
+                <div className="divide-y divide-border/60">
+                  {customFieldsDraft.map((field) => {
+                    const revealedVal = revealedCustomFields[field.name];
+                    const isRevealed = revealedVal !== undefined;
+                    const displayVal = presentationMode
+                      ? '••••••••'
+                      : field.protected
+                        ? isRevealed
+                          ? revealedVal
+                          : field.dirty
+                            ? field.value
+                            : '••••••••'
+                        : field.value || '—';
+
+                    return (
+                      <div
+                        key={field.name}
+                        className="group/cf flex items-center justify-between gap-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {field.protected && (
+                            <Lock className="h-3 w-3 text-fg-subtle shrink-0" aria-hidden="true" />
+                          )}
+                          <span className="font-mono text-fg-muted truncate">{field.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono text-fg truncate max-w-56">{displayVal}</span>
+                          {field.protected && !field.dirty && !entryModalOpen && !presentationMode && (
+                            <button
+                              type="button"
+                              aria-label={isRevealed ? t.hide : t.reveal}
+                              onClick={() => {
+                                if (isRevealed) {
+                                  setRevealedCustomFields((prev) => {
+                                    const next = { ...prev };
+                                    delete next[field.name];
+                                    return next;
+                                  });
+                                } else {
+                                  void api.revealCustomField(uuid, field.name).then((val) => {
+                                    setRevealedCustomFields((prev) => ({
+                                      ...prev,
+                                      [field.name]: val,
+                                    }));
+                                  });
+                                }
+                              }}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                            >
+                              {isRevealed ? (
+                                <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                              ) : (
+                                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                              )}
+                            </button>
+                          )}
+                          {!entryModalOpen && (
+                            <button
+                              type="button"
+                              aria-label={`${t.copyField}: ${field.name}`}
+                              onClick={() => {
+                                void api.copyCustomField(uuid, field.name).then(() => {
+                                  pushToast({
+                                    kind: 'clipboard',
+                                    title: t.copiedFieldToast,
+                                    clearAfterSeconds: clipboardClearSeconds,
+                                  });
+                                });
+                              }}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                            >
+                              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`${t.removeField}: ${field.name}`}
+                            onClick={() => {
+                              setCustomFieldsDraft((prev) =>
+                                prev.filter((f) => f.name !== field.name),
+                              );
+                              if (!entryModalOpen) {
+                                setRemovedCustomFields((prev) =>
+                                  prev.includes(field.name) ? prev : [...prev, field.name],
+                                );
+                              }
+                            }}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-subtle hover:text-danger hover:bg-danger-subtle cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                !addingField && <p className="text-xs text-fg-subtle">{t.noCustomFields}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Attachments — seção interativa */}
+        {!entryModalOpen && details && (
+          <div className="border-t border-border/70 pt-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-fg">
+                {t.attachments} ({details.attachments.length})
+              </p>
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                aria-label={t.addAttachment}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  if (files.length === 0) return;
+                  setAttachmentBusy(true);
+                  void (async () => {
+                    try {
+                      for (const file of files) {
+                        const dataUrl = await new Promise<string>((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(String(reader.result ?? ''));
+                          reader.onerror = () => reject(reader.error);
+                          reader.readAsDataURL(file);
+                        });
+                        await api.addAttachment(uuid, file.name, dataUrl);
+                      }
+                      await queryClient.invalidateQueries({ queryKey: ['entry-details', uuid] });
+                      pushToast({ kind: 'success', title: t.attachmentAddedToast });
+                    } finally {
+                      setAttachmentBusy(false);
+                    }
+                  })();
+                }}
+              />
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                isLoading={attachmentBusy}
+                onPress={() => attachmentInputRef.current?.click()}
+              >
+                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                {t.addAttachment}
+              </Button>
+            </div>
+
+            {details.attachments.length > 0 ? (
               <div className="divide-y divide-border/60">
-                {details.customFields.map((field) => (
-                  <div key={field.name} className="flex items-center justify-between gap-4 py-2 text-xs">
-                    <span className="font-mono text-fg-muted truncate">{field.name}</span>
-                    <span className="font-mono text-fg">
-                      {field.protected || presentationMode ? '••••••••' : field.value ?? '—'}
+                {details.attachments.map((att) => (
+                  <div
+                    key={att}
+                    className="flex items-center justify-between gap-3 py-2 text-xs"
+                  >
+                    <span className="flex items-center gap-2 min-w-0 font-mono text-fg truncate">
+                      <Paperclip className="h-3.5 w-3.5 text-fg-subtle shrink-0" aria-hidden="true" />
+                      <span className="truncate">{att}</span>
                     </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        aria-label={`${t.downloadAttachment}: ${att}`}
+                        onClick={() => {
+                          void api.saveAttachment(uuid, att).then((saved) => {
+                            if (saved) pushToast({ kind: 'success', title: t.attachmentSavedToast });
+                          });
+                        }}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${t.removeAttachment}: ${att}`}
+                        onClick={() => {
+                          void api.removeAttachment(uuid, att).then(async () => {
+                            await queryClient.invalidateQueries({ queryKey: ['entry-details', uuid] });
+                            pushToast({ kind: 'info', title: t.attachmentRemovedToast });
+                          });
+                        }}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-subtle hover:text-danger hover:bg-danger-subtle cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-xs text-fg-subtle">{t.noAttachments}</p>
             )}
-          </div>
-        )}
-
-        {/* Attachments — seção aberta sem card */}
-        {!entryModalOpen && details && details.attachments.length > 0 && (
-          <div className="border-t border-border/70 pt-4 flex flex-col gap-2.5">
-            <p className="text-xs font-semibold text-fg">{t.attachments}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {details.attachments.map((att) => (
-                <Badge key={att} variant="neutral">
-                  <Paperclip className="h-3 w-3" aria-hidden="true" />
-                  {att}
-                </Badge>
-              ))}
-            </div>
           </div>
         )}
 

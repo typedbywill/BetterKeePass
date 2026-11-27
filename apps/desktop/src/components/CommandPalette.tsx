@@ -237,6 +237,36 @@ export function CommandPalette({
     setActiveIndex(0);
   }, [filter]);
 
+  async function copyEntryFromPalette(
+    entry: EntrySummary,
+    field: 'password' | 'username' | 'totp' | 'url',
+  ) {
+    if (field === 'url') {
+      if (!entry.url) return;
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(entry.url);
+      }
+      pushToast({
+        kind: 'clipboard',
+        title: `${entry.title} · ${t.copiedUrlToast}`,
+        clearAfterSeconds: clipboardClearSeconds,
+      });
+      return;
+    }
+    await api.copySecret(entry.uuid, field);
+    pushToast({
+      kind: 'clipboard',
+      title: `${entry.title} · ${
+        field === 'password'
+          ? t.copiedPasswordToast
+          : field === 'username'
+            ? t.copiedUsernameToast
+            : t.copiedTotpToast
+      }`,
+      clearAfterSeconds: clipboardClearSeconds,
+    });
+  }
+
   async function executeItem(item: PaletteItem, openOnly: boolean) {
     if (item.kind === 'command') {
       item.run();
@@ -354,6 +384,33 @@ export function CommandPalette({
           } else if (e.key === 'Enter' && flatItems[activeIndex]) {
             e.preventDefault();
             void executeItem(flatItems[activeIndex], e.ctrlKey || e.metaKey);
+          } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+            const activeItem = flatItems[activeIndex];
+            if (activeItem?.kind === 'entry') {
+              const key = e.key.toLowerCase();
+              const inputEl = e.target as HTMLInputElement | null;
+              const hasSelection =
+                inputEl &&
+                typeof inputEl.selectionStart === 'number' &&
+                typeof inputEl.selectionEnd === 'number' &&
+                inputEl.selectionStart !== inputEl.selectionEnd;
+              if (key === 'c' && !hasSelection) {
+                e.preventDefault();
+                void copyEntryFromPalette(activeItem.entry, 'password');
+              } else if (key === 'b') {
+                e.preventDefault();
+                void copyEntryFromPalette(activeItem.entry, 'username');
+              } else if (key === 't') {
+                e.preventDefault();
+                void copyEntryFromPalette(activeItem.entry, 'totp');
+              } else if (key === 'u') {
+                e.preventDefault();
+                void copyEntryFromPalette(activeItem.entry, 'url');
+              } else if (key === 'o' && activeItem.entry.url) {
+                e.preventDefault();
+                window.open(activeItem.entry.url, '_blank', 'noopener,noreferrer');
+              }
+            }
           }
         }}
       >

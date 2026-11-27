@@ -53,7 +53,7 @@ impl Default for ClipboardConfig {
 pub struct UiConfig {
     /// Tema inicial (`system`, `light` ou `dark`).
     pub theme: String,
-    /// Paleta de cores selecionada (`default`, `tokyo-night`, `catppuccin`, etc.).
+    /// Paleta de cores selecionada (`default`, `tokyo`, `catppuccin`, etc.).
     pub theme_preset: String,
     /// Idioma inicial (`pt-BR` ou `en`).
     pub language: String,

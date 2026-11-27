@@ -3,7 +3,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export type ThemePreset =
   | 'default'
   | 'amoled'
-  | 'tokyo-night'
+  | 'tokyo'
   | 'catppuccin'
   | 'nord'
   | 'atom'
@@ -33,8 +33,8 @@ export const THEME_PRESETS: readonly ThemePresetMeta[] = [
     darkSwatches: ['#0a0a0a', '#171717', '#34d399', '#fafafa'],
   },
   {
-    id: 'tokyo-night',
-    name: 'Tokyo Night',
+    id: 'tokyo',
+    name: 'Tokyo',
     lightSwatches: ['#e1e2e7', '#e9e9ed', '#2e7de9', '#3760bf'],
     darkSwatches: ['#1a1b26', '#1f2335', '#7aa2f7', '#c0caf5'],
   },

@@ -99,7 +99,7 @@
   --ring: #34d399;
 }
 
-[data-theme="tokyo-night"] {
+[data-theme="tokyo"] {
   color-scheme: light;
 
   --bg: #e1e2e7;
@@ -123,7 +123,7 @@
   --ring: #2e7de9;
 }
 
-.dark[data-theme="tokyo-night"] {
+.dark[data-theme="tokyo"] {
   color-scheme: dark;
 
   --bg: #1a1b26;

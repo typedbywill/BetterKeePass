@@ -296,18 +296,18 @@ describe('BetterKeePass Desktop UI', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Configurações/i }));
 
-    const tokyoNightBtn = await screen.findByRole('button', { name: 'Tokyo Night' });
+    const tokyoNightBtn = await screen.findByRole('button', { name: 'Tokyo' });
     fireEvent.click(tokyoNightBtn);
-    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo');
     expect(tokyoNightBtn).toHaveAttribute('aria-pressed', 'true');
 
     const settings = screen.getByRole('region', { name: 'Configurações' });
     fireEvent.click(within(settings).getByRole('radio', { name: 'Escuro' }));
-    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
 
     fireEvent.click(within(settings).getByRole('radio', { name: 'Claro' }));
-    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
 
     const amoledBtn = screen.getByRole('button', { name: 'AMOLED' });
@@ -474,6 +474,61 @@ describe('BetterKeePass Desktop UI', () => {
     await waitFor(() => {
       expect(copySpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'password');
     });
+    copySpy.mockRestore();
+  });
+
+  it('adds a custom field and saves it on the entry', async () => {
+    const updateSpy = vi.spyOn(api, 'updateEntry');
+    renderApp();
+    await unlockDemoVault();
+
+    fireEvent.click(screen.getByText('GitHub'));
+    const detail = await screen.findByRole('region', { name: 'Detalhes da entrada' });
+    fireEvent.click(await within(detail).findByRole('button', { name: /Adicionar campo/i }));
+
+    fireEvent.change(within(detail).getByLabelText(/Nome do campo/i), {
+      target: { value: 'API_KEY' },
+    });
+    fireEvent.change(within(detail).getByLabelText(/^Valor$/i), {
+      target: { value: 'secret-xyz' },
+    });
+    fireEvent.keyDown(within(detail).getByLabelText(/^Valor$/i), { key: 'Enter' });
+
+    fireEvent.click(within(detail).getByRole('button', { name: /Salvar entrada/i }));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111',
+        expect.objectContaining({
+          customFields: [{ name: 'API_KEY', value: 'secret-xyz', protected: false }],
+        }),
+      );
+    });
+    updateSpy.mockRestore();
+  });
+
+  it('copies entry secrets from CommandPalette shortcuts without closing it', async () => {
+    const copySpy = vi.spyOn(api, 'copySecret');
+    renderApp();
+    await unlockDemoVault();
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const palette = await screen.findByRole('dialog', { name: /Paleta de comandos/i });
+    const searchInput = within(palette).getByLabelText(/Paleta de comandos/i);
+    fireEvent.change(searchInput, { target: { value: 'GitHub' } });
+
+    fireEvent.keyDown(searchInput, { key: 'c', ctrlKey: true });
+    await waitFor(() => {
+      expect(copySpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'password');
+    });
+    expect(screen.getByRole('dialog', { name: /Paleta de comandos/i })).toBeInTheDocument();
+
+    fireEvent.keyDown(searchInput, { key: 'b', ctrlKey: true });
+    await waitFor(() => {
+      expect(copySpy).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'username');
+    });
+    expect(screen.getByRole('dialog', { name: /Paleta de comandos/i })).toBeInTheDocument();
+
     copySpy.mockRestore();
   });
 });
