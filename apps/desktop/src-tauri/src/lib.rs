@@ -1,12 +1,17 @@
 use std::{
+    fs,
+    io::Read,
+    net::IpAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use base64::Engine as _;
 use bkp_core::{
-    AppConfig, EntryDetails, EntrySummary, GroupNode, HealthReport, HistoryEntrySummary, NewEntry,
-    OtpCode, PasswordOptions, Vault, analyze_health, generate_passphrase, generate_password,
+    AppConfig, ClipboardConfig, EntryDetails, EntryPatch, EntrySummary, GroupNode, HealthReport,
+    HistoryEntrySummary, NewEntry, OtpCode, PasswordOptions, SecurityConfig, UiConfig, Vault,
+    analyze_health, generate_passphrase, generate_password,
 };
 use bkp_platform::ClipboardManager;
 use bkp_protocol::PairedBrowser;
@@ -14,6 +19,8 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
+
+const MAX_FAVICON_BYTES: u64 = 262_144;
 
 struct UnlockedVault {
     vault: Vault,
@@ -25,7 +32,7 @@ struct UnlockedVault {
 
 struct AppState {
     session: Arc<Mutex<Option<UnlockedVault>>>,
-    config: AppConfig,
+    config: Mutex<AppConfig>,
     clipboard: ClipboardManager,
     paired_browsers: Mutex<Vec<PairedBrowser>>,
 }
@@ -52,6 +59,32 @@ impl From<EntryDetails> for EntryDetailsDto {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppConfigDto {
+    security: SecurityConfig,
+    clipboard: ClipboardConfig,
+    ui: UiConfig,
+    managed_by_nix: bool,
+}
+
+impl From<&AppConfig> for AppConfigDto {
+    fn from(value: &AppConfig) -> Self {
+        Self {
+            security: value.security.clone(),
+            clipboard: value.clipboard.clone(),
+            ui: value.ui.clone(),
+            managed_by_nix: value.managed_by_nix,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetUiConfigResult {
+    persisted: bool,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewEntryPayload {
@@ -63,6 +96,17 @@ struct NewEntryPayload {
     notes: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EntryPatchPayload {
+    title: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    url: Option<String>,
+    notes: Option<String>,
+    tags: Option<Vec<String>>,
 }
 
 fn with_vault_mut<T>(
@@ -179,7 +223,12 @@ fn copy_entry_field(
     field: String,
 ) -> Result<(), String> {
     let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
-    let clear_secs = state.config.clipboard.clear_after_seconds;
+    let clear_secs = state
+        .config
+        .lock()
+        .map_err(|_| "falha ao ler configuração".to_owned())?
+        .clipboard
+        .clear_after_seconds;
     let secret = with_vault_mut(&state, |u| match field.as_str() {
         "password" => u.vault.entry_secret(parsed).map_err(|e| e.to_string()),
         "username" => {
@@ -188,6 +237,10 @@ fn copy_entry_field(
                 .entry_details(parsed, false)
                 .map_err(|e| e.to_string())?;
             Ok(SecretString::from(details.summary.username))
+        }
+        "totp" => {
+            let otp = u.vault.totp_now(parsed).map_err(|e| e.to_string())?;
+            Ok(SecretString::from(otp.code))
         }
         _ => Err("campo não suportado".to_owned()),
     })?;
@@ -240,6 +293,47 @@ fn add_entry(state: State<'_, AppState>, payload: NewEntryPayload) -> Result<Str
 }
 
 #[tauri::command]
+fn update_entry(
+    state: State<'_, AppState>,
+    uuid: String,
+    patch: EntryPatchPayload,
+) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        u.vault
+            .edit_entry(
+                parsed,
+                EntryPatch {
+                    title: patch.title,
+                    username: patch.username,
+                    password: patch.password.map(SecretString::from),
+                    url: patch.url,
+                    notes: patch.notes,
+                    tags: patch.tags,
+                    custom_fields: Vec::new(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+fn restore_history(state: State<'_, AppState>, uuid: String, index: usize) -> Result<(), String> {
+    let parsed = Uuid::parse_str(&uuid).map_err(|e| e.to_string())?;
+    with_vault_mut(&state, |u| {
+        u.vault
+            .restore_history(parsed, index)
+            .map_err(|e| e.to_string())?;
+        u.vault
+            .save(&u.path, u.master_password.clone(), u.keyfile.as_deref())
+            .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
 fn delete_entry(
     state: State<'_, AppState>,
     uuid: String,
@@ -278,8 +372,138 @@ fn analyze_health_cmd(state: State<'_, AppState>) -> Result<HealthReport, String
 }
 
 #[tauri::command]
-fn get_app_config(state: State<'_, AppState>) -> AppConfig {
-    state.config.clone()
+fn get_app_config(state: State<'_, AppState>) -> Result<AppConfigDto, String> {
+    let guard = state
+        .config
+        .lock()
+        .map_err(|_| "falha ao acessar configuração".to_owned())?;
+    Ok(AppConfigDto::from(&*guard))
+}
+
+#[tauri::command]
+fn set_ui_config(state: State<'_, AppState>, ui: UiConfig) -> Result<SetUiConfigResult, String> {
+    let mut guard = state
+        .config
+        .lock()
+        .map_err(|_| "falha ao acessar configuração".to_owned())?;
+    guard.ui = ui;
+    if guard.managed_by_nix {
+        return Ok(SetUiConfigResult { persisted: false });
+    }
+    guard.save().map_err(|e| e.to_string())?;
+    Ok(SetUiConfigResult { persisted: true })
+}
+
+fn validate_public_domain(raw: &str) -> Option<String> {
+    let domain = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    if domain.is_empty() || domain.len() > 253 || !domain.contains('.') {
+        return None;
+    }
+    if domain == "localhost"
+        || domain.ends_with(".localhost")
+        || domain.ends_with(".local")
+        || domain.ends_with(".internal")
+    {
+        return None;
+    }
+    if domain.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let valid_chars = domain
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.');
+    if !valid_chars || domain.starts_with('.') || domain.contains("..") {
+        return None;
+    }
+    Some(domain)
+}
+
+fn favicon_cache_dir() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return Some(PathBuf::from(xdg).join("betterkeepass/favicons"));
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".cache/betterkeepass/favicons"))
+}
+
+fn detect_icon_mime(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
+        "image/svg+xml"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
+    } else {
+        "image/x-icon"
+    }
+}
+
+fn fetch_icon_bytes(agent: &ureq::Agent, url: &str) -> Option<Vec<u8>> {
+    let response = agent.get(url).call().ok()?;
+    let mut reader = response.into_body().into_reader().take(MAX_FAVICON_BYTES);
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).ok()?;
+    if buf.is_empty() || buf.len() as u64 >= MAX_FAVICON_BYTES {
+        return None;
+    }
+    Some(buf)
+}
+
+#[tauri::command]
+fn get_favicon(state: State<'_, AppState>, domain: String) -> Result<Option<String>, String> {
+    let enabled = state
+        .config
+        .lock()
+        .map_err(|_| "falha ao acessar configuração".to_owned())?
+        .ui
+        .fetch_favicons;
+    if !enabled {
+        return Ok(None);
+    }
+
+    let Some(clean_domain) = validate_public_domain(&domain) else {
+        return Ok(None);
+    };
+
+    let cache_path = favicon_cache_dir().map(|dir| dir.join(format!("{clean_domain}.b64")));
+    if let Some(ref path) = cache_path
+        && path.exists()
+        && let Ok(cached) = fs::read_to_string(path)
+        && cached.starts_with("data:image/")
+    {
+        return Ok(Some(cached));
+    }
+
+    let agent_config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build();
+    let agent: ureq::Agent = agent_config.into();
+
+    let primary = format!("https://{clean_domain}/favicon.ico");
+    let fallback = format!("https://{clean_domain}/apple-touch-icon.png");
+    let Some(bytes) =
+        fetch_icon_bytes(&agent, &primary).or_else(|| fetch_icon_bytes(&agent, &fallback))
+    else {
+        return Ok(None);
+    };
+
+    let mime = detect_icon_mime(&bytes);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let data_url = format!("data:{mime};base64,{encoded}");
+
+    if let Some(path) = cache_path {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, &data_url);
+    }
+
+    Ok(Some(data_url))
 }
 
 #[tauri::command]
@@ -322,7 +546,7 @@ pub fn run() {
 
     let state = AppState {
         session,
-        config,
+        config: Mutex::new(config),
         clipboard: ClipboardManager::new(),
         paired_browsers: Mutex::new(Vec::new()),
     };
@@ -341,11 +565,15 @@ pub fn run() {
             get_entry_totp,
             get_entry_history,
             add_entry,
+            update_entry,
+            restore_history,
             delete_entry,
             generate_password_cmd,
             generate_passphrase_cmd,
             analyze_health_cmd,
             get_app_config,
+            set_ui_config,
+            get_favicon,
             list_paired_browsers,
             revoke_paired_browser,
         ])

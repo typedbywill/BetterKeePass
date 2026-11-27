@@ -61,11 +61,25 @@ export interface HealthReport {
   issues: HealthIssue[];
 }
 
+export interface UiConfig {
+  theme: string;
+  language: string;
+  presentationMode: boolean;
+  sidebarCollapsed: boolean;
+  listWidth: number;
+  fetchFavicons: boolean;
+  sortBy: string;
+}
+
 export interface AppConfig {
   security: { lockAfterSeconds: number; lockOnSessionLock: boolean };
   clipboard: { clearAfterSeconds: number };
-  ui: { theme: string; language: string; presentationMode: boolean };
-  managed_by_nix: boolean;
+  ui: UiConfig;
+  managedByNix: boolean;
+}
+
+export interface SetUiConfigResult {
+  persisted: boolean;
 }
 
 export interface PairedBrowser {
@@ -83,6 +97,15 @@ export interface NewEntryPayload {
   url?: string;
   notes?: string;
   tags: string[];
+}
+
+export interface EntryPatchPayload {
+  title?: string;
+  username?: string;
+  password?: string;
+  url?: string;
+  notes?: string;
+  tags?: string[];
 }
 
 const hasTauri = () =>
@@ -125,6 +148,26 @@ const mockEntries: (EntryDetailsView & { _secret: string })[] = [
     _secret: '123456',
   },
 ];
+
+const mockHistory = new Map<
+  string,
+  { snapshot: EntryDetailsView & { _secret: string }; lastModified: string }[]
+>();
+
+let mockConfig: AppConfig = {
+  security: { lockAfterSeconds: 300, lockOnSessionLock: true },
+  clipboard: { clearAfterSeconds: 15 },
+  ui: {
+    theme: 'system',
+    language: 'pt-BR',
+    presentationMode: false,
+    sidebarCollapsed: false,
+    listWidth: 320,
+    fetchFavicons: false,
+    sortBy: 'title',
+  },
+  managedByNix: false,
+};
 
 let mockBrowsers: PairedBrowser[] = [
   {
@@ -189,15 +232,26 @@ export const api = {
           uuid: 'g1',
           name: 'Desenvolvimento',
           path: 'Desenvolvimento',
-          entryCount: 1,
+          entryCount: mockEntries.filter((e) => e.summary.groupPath === 'Desenvolvimento').length,
           isRecycleBin: false,
-          children: [],
+          children: [
+            {
+              uuid: 'g1-1',
+              name: 'Infra',
+              path: 'Desenvolvimento/Infra',
+              entryCount: mockEntries.filter(
+                (e) => e.summary.groupPath === 'Desenvolvimento/Infra',
+              ).length,
+              isRecycleBin: false,
+              children: [],
+            },
+          ],
         },
         {
           uuid: 'g2',
           name: 'Pessoal',
           path: 'Pessoal',
-          entryCount: 1,
+          entryCount: mockEntries.filter((e) => e.summary.groupPath === 'Pessoal').length,
           isRecycleBin: false,
           children: [],
         },
@@ -211,7 +265,7 @@ export const api = {
     const found = mockEntries.find((e) => e.summary.uuid === uuid);
     if (!found) throw new Error('Entry not found');
     return {
-      summary: found.summary,
+      summary: { ...found.summary, tags: [...found.summary.tags] },
       notes: found.notes,
       hasOtp: found.hasOtp,
       customFields: found.customFields,
@@ -225,22 +279,41 @@ export const api = {
     const found = mockEntries.find((e) => e.summary.uuid === uuid);
     return found?._secret ?? '';
   },
-  async copySecret(uuid: string, field: 'password' | 'username'): Promise<void> {
+  async copySecret(uuid: string, field: 'password' | 'username' | 'totp'): Promise<void> {
     if (hasTauri()) {
       await invoke('copy_entry_field', { uuid, field });
+      return;
     }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    if (!found || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    const text =
+      field === 'password'
+        ? found._secret
+        : field === 'username'
+          ? found.summary.username
+          : '482910';
+    await navigator.clipboard.writeText(text).catch(() => {});
   },
   async getTotp(uuid: string): Promise<OtpCode> {
     if (hasTauri()) {
       return invoke('get_entry_totp', { uuid });
     }
-    return { code: '482910', validForSecs: 24, periodSecs: 30 };
+    const periodSecs = 30;
+    const epochSecs = Math.floor(Date.now() / 1000);
+    const validForSecs = periodSecs - (epochSecs % periodSecs);
+    return { code: '482910', validForSecs, periodSecs };
   },
   async getHistory(uuid: string): Promise<HistoryEntrySummary[]> {
     if (hasTauri()) {
       return invoke('get_entry_history', { uuid });
     }
-    return [];
+    const revs = mockHistory.get(uuid) ?? [];
+    return revs.map((rev, index) => ({
+      index,
+      title: rev.snapshot.summary.title,
+      username: rev.snapshot.summary.username,
+      lastModified: rev.lastModified,
+    }));
   },
   async addEntry(payload: NewEntryPayload): Promise<string> {
     if (hasTauri()) {
@@ -264,56 +337,145 @@ export const api = {
     });
     return uuid;
   },
+  async updateEntry(uuid: string, patch: EntryPatchPayload): Promise<void> {
+    if (hasTauri()) {
+      await invoke('update_entry', { uuid, patch });
+      return;
+    }
+    const found = mockEntries.find((e) => e.summary.uuid === uuid);
+    if (!found) throw new Error('Entry not found');
+    const prevList = mockHistory.get(uuid) ?? [];
+    prevList.unshift({
+      snapshot: structuredClone(found),
+      lastModified: new Date().toISOString(),
+    });
+    mockHistory.set(uuid, prevList);
+
+    if (patch.title !== undefined) found.summary.title = patch.title;
+    if (patch.username !== undefined) found.summary.username = patch.username;
+    if (patch.url !== undefined) found.summary.url = patch.url;
+    if (patch.tags !== undefined) found.summary.tags = patch.tags;
+    if (patch.notes !== undefined) found.notes = patch.notes;
+    if (patch.password !== undefined) found._secret = patch.password;
+  },
+  async restoreHistory(uuid: string, index: number): Promise<void> {
+    if (hasTauri()) {
+      await invoke('restore_history', { uuid, index });
+      return;
+    }
+    const revs = mockHistory.get(uuid) ?? [];
+    const target = revs[index];
+    const currentIdx = mockEntries.findIndex((e) => e.summary.uuid === uuid);
+    if (!target || currentIdx < 0) return;
+    const current = structuredClone(mockEntries[currentIdx]);
+    mockEntries[currentIdx] = structuredClone(target.snapshot);
+    revs.unshift({ snapshot: current, lastModified: new Date().toISOString() });
+  },
   async deleteEntry(uuid: string): Promise<void> {
     if (hasTauri()) {
       await invoke('delete_entry', { uuid, permanent: false });
       return;
     }
     const idx = mockEntries.findIndex((e) => e.summary.uuid === uuid);
-    if (idx >= 0) mockEntries.splice(idx, 1);
+    if (idx >= 0) {
+      const entry = mockEntries[idx];
+      if (entry.summary.groupPath.startsWith('Recycle Bin')) {
+        mockEntries.splice(idx, 1);
+      } else {
+        entry.summary.groupPath = 'Recycle Bin';
+      }
+    }
   },
   async generatePassword(length = 20): Promise<string> {
     if (hasTauri()) {
       return invoke('generate_password_cmd', { length });
     }
-    return 'Xk9#mP2$vL7@nQ4&rT8!';
+    const alphabet =
+      'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*_-+=';
+    const out: string[] = [];
+    for (let i = 0; i < length; i += 1) {
+      out.push(alphabet[Math.floor(Math.random() * alphabet.length)]);
+    }
+    return out.join('');
   },
   async generatePassphrase(words = 5): Promise<string> {
     if (hasTauri()) {
       return invoke('generate_passphrase_cmd', { words });
     }
-    return 'aurora-cofre-cedro-atlas-floresta';
+    const pool = [
+      'aurora',
+      'cofre',
+      'cedro',
+      'atlas',
+      'floresta',
+      'nevoa',
+      'farol',
+      'prisma',
+      'vertice',
+      'sombra',
+      'brisa',
+      'granito',
+    ];
+    const out: string[] = [];
+    for (let i = 0; i < words; i += 1) {
+      out.push(pool[Math.floor(Math.random() * pool.length)]);
+    }
+    return out.join('-');
   },
   async analyzeHealth(): Promise<HealthReport> {
     if (hasTauri()) {
       return invoke('analyze_health_cmd');
     }
+    const issues: HealthIssue[] = [];
+    let emptyCount = 0;
+    let weakCount = 0;
+    for (const item of mockEntries) {
+      if (!item._secret) {
+        emptyCount += 1;
+        issues.push({
+          uuid: item.summary.uuid,
+          title: item.summary.title,
+          groupPath: item.summary.groupPath,
+          score: 0,
+          kind: 'emptyPassword',
+        });
+      } else if (item._secret.length < 10) {
+        weakCount += 1;
+        issues.push({
+          uuid: item.summary.uuid,
+          title: item.summary.title,
+          groupPath: item.summary.groupPath,
+          score: 1,
+          kind: 'weakPassword',
+        });
+      }
+    }
     return {
       totalEntries: mockEntries.length,
-      emptyCount: 0,
-      weakCount: 1,
+      emptyCount,
+      weakCount,
       reusedCount: 0,
-      issues: [
-        {
-          uuid: '22222222-2222-4222-8222-222222222222',
-          title: 'Proton Mail',
-          groupPath: 'Pessoal',
-          score: 0,
-          kind: 'weakPassword',
-        },
-      ],
+      issues,
     };
   },
   async getConfig(): Promise<AppConfig> {
     if (hasTauri()) {
       return invoke('get_app_config');
     }
-    return {
-      security: { lockAfterSeconds: 300, lockOnSessionLock: true },
-      clipboard: { clearAfterSeconds: 15 },
-      ui: { theme: 'system', language: 'pt-BR', presentationMode: false },
-      managed_by_nix: false,
-    };
+    return structuredClone(mockConfig);
+  },
+  async setUiConfig(ui: UiConfig): Promise<SetUiConfigResult> {
+    if (hasTauri()) {
+      return invoke('set_ui_config', { ui });
+    }
+    mockConfig = { ...mockConfig, ui: { ...ui } };
+    return { persisted: !mockConfig.managedByNix };
+  },
+  async getFavicon(domain: string): Promise<string | null> {
+    if (hasTauri()) {
+      return invoke('get_favicon', { domain });
+    }
+    return null;
   },
   async listPairedBrowsers(): Promise<PairedBrowser[]> {
     if (hasTauri()) {

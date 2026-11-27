@@ -266,5 +266,32 @@ fn config_toml_parses_declaratively() {
     assert_eq!(cfg.clipboard.clear_after_seconds, 10);
     assert_eq!(cfg.ui.theme, "dark");
     assert_eq!(cfg.ui.language, "en");
+    assert!(!cfg.ui.sidebar_collapsed);
+    assert_eq!(cfg.ui.list_width, 320);
+    assert!(!cfg.ui.fetch_favicons);
+    assert_eq!(cfg.ui.sort_by, "title");
+
+    // Roundtrip com novos campos de UiConfig
+    let roundtrip_path = dir.join("roundtrip.toml");
+    let mut updated = cfg.clone();
+    updated.ui.sidebar_collapsed = true;
+    updated.ui.list_width = 360;
+    updated.ui.fetch_favicons = true;
+    updated.ui.sort_by = "recent".to_owned();
+    updated.source_path = Some(roundtrip_path.clone());
+    updated.managed_by_nix = false;
+    updated.save().unwrap();
+
+    let reloaded = AppConfig::load_from_path(&roundtrip_path).unwrap();
+    assert!(reloaded.ui.sidebar_collapsed);
+    assert_eq!(reloaded.ui.list_width, 360);
+    assert!(reloaded.ui.fetch_favicons);
+    assert_eq!(reloaded.ui.sort_by, "recent");
+
+    // Bloqueia gravação quando gerenciada pelo Nix
+    let mut nix_cfg = reloaded;
+    nix_cfg.managed_by_nix = true;
+    assert!(nix_cfg.save().is_err());
+
     let _ = std::fs::remove_dir_all(&dir);
 }

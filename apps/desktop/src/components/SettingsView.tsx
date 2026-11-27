@@ -1,14 +1,23 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Switch } from '@heroui/react';
-import { Info } from 'lucide-react';
+import { Info, Monitor, Moon, Sun } from 'lucide-react';
+import type { Language } from '../i18n';
 import type { Translations } from '../i18n/pt-BR';
 import { api } from '../lib/tauri';
-import { useUiStore } from '../store/ui';
+import { useUiStore, type ThemeMode } from '../store/ui';
+import { Button, SegmentedControl, Switch } from '../ui';
 
 export function SettingsView({ t }: { t: Translations }) {
   const queryClient = useQueryClient();
-  const { theme, setTheme, language, setLanguage, presentationMode, togglePresentationMode } =
-    useUiStore();
+  const {
+    theme,
+    setTheme,
+    language,
+    setLanguage,
+    presentationMode,
+    togglePresentationMode,
+    faviconsEnabled,
+    setFaviconsEnabled,
+  } = useUiStore();
 
   const configQuery = useQuery({
     queryKey: ['app-config'],
@@ -20,7 +29,7 @@ export function SettingsView({ t }: { t: Translations }) {
     queryFn: () => api.listPairedBrowsers(),
   });
 
-  const managed = configQuery.data?.managed_by_nix ?? false;
+  const managed = configQuery.data?.managedByNix ?? false;
 
   async function handleRevoke(id: string) {
     await api.revokeBrowser(id);
@@ -28,107 +37,146 @@ export function SettingsView({ t }: { t: Translations }) {
   }
 
   return (
-    <section aria-label={t.settingsTitle} className="flex-1 p-6 overflow-y-auto">
-      <div className="max-w-2xl flex flex-col gap-4">
-        <h2 className="text-xl font-semibold">{t.settingsTitle}</h2>
+    <section aria-label={t.settingsTitle} className="flex-1 p-6 overflow-y-auto bg-bg">
+      <div className="max-w-2xl mx-auto flex flex-col gap-5">
+        <h2 className="text-lg font-semibold tracking-tight text-fg">{t.settingsTitle}</h2>
 
         {managed && (
           <div
             role="status"
-            className="flex items-center gap-2 p-3 rounded-lg border border-sky-700 bg-sky-950/60 text-sky-200 text-sm"
+            className="flex items-center gap-2.5 p-3 rounded-xl border border-accent/30 bg-accent-subtle text-fg text-xs"
           >
-            <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <Info className="h-4 w-4 text-accent shrink-0" aria-hidden="true" />
             <span>{t.nixManagedBanner}</span>
           </div>
         )}
 
-        <Card className="border border-slate-800 bg-slate-900/60">
-          <Card.Content className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t.themeLabel}</span>
-              <div className="flex gap-2">
-                {(['system', 'light', 'dark'] as const).map((opt) => (
-                  <Button
-                    key={opt}
-                    size="sm"
-                    variant={theme === opt ? 'primary' : 'secondary'}
-                    isDisabled={managed}
-                    onPress={() => setTheme(opt)}
-                  >
-                    {opt}
-                  </Button>
-                ))}
-              </div>
+        {/* Appearance */}
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border bg-bg-subtle">
+            <h3 className="text-xs font-semibold text-fg">{t.appearanceSection}</h3>
+          </div>
+          <div className="divide-y divide-border">
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <span className="text-[13px] text-fg">{t.themeLabel}</span>
+              <SegmentedControl<ThemeMode>
+                ariaLabel={t.themeLabel}
+                value={theme}
+                onChange={setTheme}
+                isDisabled={managed}
+                options={[
+                  {
+                    value: 'system',
+                    label: t.themeSystem,
+                    icon: <Monitor className="h-3.5 w-3.5" aria-hidden="true" />,
+                  },
+                  {
+                    value: 'light',
+                    label: t.themeLight,
+                    icon: <Sun className="h-3.5 w-3.5" aria-hidden="true" />,
+                  },
+                  {
+                    value: 'dark',
+                    label: t.themeDark,
+                    icon: <Moon className="h-3.5 w-3.5" aria-hidden="true" />,
+                  },
+                ]}
+              />
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-800 pt-3">
-              <span className="text-sm">{t.languageLabel}</span>
-              <div className="flex gap-2">
-                {(['pt-BR', 'en'] as const).map((lang) => (
-                  <Button
-                    key={lang}
-                    size="sm"
-                    variant={language === lang ? 'primary' : 'secondary'}
-                    isDisabled={managed}
-                    onPress={() => setLanguage(lang)}
-                  >
-                    {lang}
-                  </Button>
-                ))}
-              </div>
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <span className="text-[13px] text-fg">{t.languageLabel}</span>
+              <SegmentedControl<Language>
+                ariaLabel={t.languageLabel}
+                value={language}
+                onChange={setLanguage}
+                isDisabled={managed}
+                options={[
+                  { value: 'pt-BR', label: 'pt-BR' },
+                  { value: 'en', label: 'en' },
+                ]}
+              />
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-800 pt-3">
-              <span className="text-sm">{t.presentationMode}</span>
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[13px] text-fg">{t.faviconsLabel}</p>
+                <p className="text-xs text-fg-muted mt-0.5">{t.faviconsDesc}</p>
+              </div>
+              <Switch
+                isSelected={faviconsEnabled}
+                onChange={setFaviconsEnabled}
+                isDisabled={managed}
+                aria-label={t.faviconsLabel}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Security */}
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border bg-bg-subtle">
+            <h3 className="text-xs font-semibold text-fg">{t.securitySection}</h3>
+          </div>
+          <div className="divide-y divide-border">
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <span className="text-[13px] text-fg">{t.presentationMode}</span>
               <Switch
                 isSelected={presentationMode}
                 onChange={togglePresentationMode}
                 aria-label={t.presentationMode}
-              >
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-              </Switch>
+              />
             </div>
 
             {configQuery.data && (
-              <div className="border-t border-slate-800 pt-3 text-xs text-slate-400 flex flex-col gap-1">
-                <span>
-                  {t.lockAfterLabel}: {configQuery.data.security.lockAfterSeconds}s
-                </span>
-                <span>
-                  {t.clipboardClearLabel}: {configQuery.data.clipboard.clearAfterSeconds}s
-                </span>
+              <div className="px-4 py-3 flex flex-col gap-1.5 text-xs text-fg-muted">
+                <div className="flex justify-between">
+                  <span>{t.lockAfterLabel}</span>
+                  <span className="font-mono text-fg tabular-nums">
+                    {configQuery.data.security.lockAfterSeconds}s
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{t.clipboardClearLabel}</span>
+                  <span className="font-mono text-fg tabular-nums">
+                    {configQuery.data.clipboard.clearAfterSeconds}s
+                  </span>
+                </div>
               </div>
             )}
-          </Card.Content>
-        </Card>
+          </div>
+        </div>
 
-        <Card className="border border-slate-800 bg-slate-900/60">
-          <Card.Header>
-            <Card.Title className="text-sm">{t.pairedBrowsers}</Card.Title>
-          </Card.Header>
-          <Card.Content className="flex flex-col gap-2">
+        {/* Paired Browsers */}
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border bg-bg-subtle">
+            <h3 className="text-xs font-semibold text-fg">{t.pairedBrowsers}</h3>
+          </div>
+          <div className="p-4 flex flex-col gap-2">
             {browsersQuery.data && browsersQuery.data.length > 0 ? (
               browsersQuery.data.map((browser) => (
                 <div
                   key={browser.id}
-                  className="flex items-center justify-between p-2 rounded border border-slate-800"
+                  className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-border bg-bg-subtle"
                 >
-                  <div>
-                    <p className="text-sm font-medium">{browser.name}</p>
-                    <p className="text-xs text-slate-400">{browser.pairedAt}</p>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-fg truncate">{browser.name}</p>
+                    <p className="text-xs text-fg-muted font-mono truncate">{browser.pairedAt}</p>
                   </div>
-                  <Button size="sm" variant="danger" onPress={() => handleRevoke(browser.id)}>
+                  <Button
+                    size="xs"
+                    variant="danger"
+                    onPress={() => void handleRevoke(browser.id)}
+                  >
                     {t.revokeBrowser}
                   </Button>
                 </div>
               ))
             ) : (
-              <p className="text-xs text-slate-400">{t.noPairedBrowsers}</p>
+              <p className="text-xs text-fg-muted">{t.noPairedBrowsers}</p>
             )}
-          </Card.Content>
-        </Card>
+          </div>
+        </div>
       </div>
     </section>
   );

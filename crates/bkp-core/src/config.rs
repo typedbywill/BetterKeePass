@@ -54,6 +54,14 @@ pub struct UiConfig {
     pub language: String,
     /// Iniciar em modo apresentação.
     pub presentation_mode: bool,
+    /// Sidebar recolhida para ícones apenas.
+    pub sidebar_collapsed: bool,
+    /// Largura da lista de entradas em pixels.
+    pub list_width: u32,
+    /// Buscar favicons remotos via HTTPS (opt-in; desativado por padrão).
+    pub fetch_favicons: bool,
+    /// Ordenação padrão da lista (`title` ou `recent`).
+    pub sort_by: String,
 }
 
 impl Default for UiConfig {
@@ -62,6 +70,10 @@ impl Default for UiConfig {
             theme: "system".to_owned(),
             language: "pt-BR".to_owned(),
             presentation_mode: false,
+            sidebar_collapsed: false,
+            list_width: 320,
+            fetch_favicons: false,
+            sort_by: "title".to_owned(),
         }
     }
 }
@@ -132,6 +144,25 @@ impl AppConfig {
         config.managed_by_nix = detect_managed_by_nix(path);
         config.source_path = Some(path.to_path_buf());
         Ok(config)
+    }
+
+    /// Salva a configuração no caminho de origem ou no caminho padrão XDG do usuário.
+    pub fn save(&self) -> Result<()> {
+        if self.managed_by_nix {
+            return Err(crate::error::CoreError::InvalidInput(
+                "configuração gerenciada declarativamente pelo Nix".to_owned(),
+            ));
+        }
+        let target = self
+            .source_path
+            .clone()
+            .or_else(user_config_path)
+            .ok_or_else(|| {
+                crate::error::CoreError::InvalidInput(
+                    "não foi possível determinar o caminho da configuração do usuário".to_owned(),
+                )
+            })?;
+        self.save_to_path(&target)
     }
 
     /// Salva a configuração em um arquivo TOML (quando não gerenciada pelo Nix).
