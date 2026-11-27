@@ -5,6 +5,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { EntryDetail } from './components/EntryDetail';
 import { EntryList } from './components/EntryList';
 import { HealthView } from './components/HealthView';
+import { PinSetupDialog } from './components/PinSetupDialog';
 import { SettingsView } from './components/SettingsView';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { Sidebar } from './components/Sidebar';
@@ -54,7 +55,8 @@ export function App() {
 
   const t = getTranslations(language);
   const detailRef = useRef<HTMLElement | null>(null);
-  const restoreAttemptedRef = useRef(false);
+  const pinPromptedRef = useRef(false);
+  const [pinSetupOpen, setPinSetupOpen] = useState(false);
   const [editRequestNonce, setEditRequestNonce] = useState(0);
 
   // Apply theme mode & preset for both UnlockScreen and unlocked shell, reacting to OS theme changes.
@@ -83,6 +85,12 @@ export function App() {
     queryFn: () => api.getConfig(),
   });
 
+  const pinStatusQuery = useQuery({
+    queryKey: ['pin-status'],
+    queryFn: () => api.getPinSessionStatus(),
+    enabled: unlocked,
+  });
+
   useEffect(() => {
     if (configQuery.data && !configHydrated) {
       hydrateFromConfig(
@@ -93,17 +101,18 @@ export function App() {
     }
   }, [configQuery.data, configHydrated, hydrateFromConfig]);
 
-  // Attempt to restore a persisted session once on app startup.
+  // Prompt the user to create a PIN right after unlocking if none is configured yet.
   useEffect(() => {
-    if (restoreAttemptedRef.current || unlocked || !configQuery.data) return;
-    restoreAttemptedRef.current = true;
-    if (!configQuery.data.security.rememberSession) return;
-    void api.restoreSession().then((restoredPath) => {
-      if (restoredPath) {
-        setUnlocked(true, restoredPath);
-      }
-    });
-  }, [configQuery.data, unlocked, setUnlocked]);
+    if (!unlocked) {
+      pinPromptedRef.current = false;
+      setPinSetupOpen(false);
+      return;
+    }
+    if (!pinPromptedRef.current && pinStatusQuery.data && !pinStatusQuery.data.hasPin) {
+      pinPromptedRef.current = true;
+      setPinSetupOpen(true);
+    }
+  }, [unlocked, pinStatusQuery.data]);
 
   const faviconsWereEnabled = useRef(faviconsEnabled);
 
@@ -370,6 +379,7 @@ export function App() {
 
       <CommandPalette t={t} entries={allEntriesQuery.data ?? []} />
       <ShortcutsDialog t={t} />
+      <PinSetupDialog t={t} isOpen={pinSetupOpen} onOpenChange={setPinSetupOpen} />
       <AlertDialog
         isOpen={Boolean(deleteConfirmId)}
         onOpenChange={(open) => {

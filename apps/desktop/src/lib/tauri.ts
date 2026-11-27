@@ -131,6 +131,13 @@ export interface SetUiConfigResult {
   persisted: boolean;
 }
 
+export interface PinSessionStatus {
+  hasPin: boolean;
+  vaultPath: string | null;
+  failedAttempts: number;
+  maxAttempts: number;
+}
+
 export interface PairedBrowser {
   id: string;
   name: string;
@@ -247,6 +254,28 @@ let mockBrowsers: PairedBrowser[] = [
   },
 ];
 
+const MOCK_PIN_KEY = 'bkp.mockPinSession';
+const MOCK_MAX_PIN_ATTEMPTS = 5;
+
+function readMockPinSession(): { vaultPath: string; pin: string; failedAttempts: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MOCK_PIN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.vaultPath === 'string' && typeof parsed?.pin === 'string') {
+      return {
+        vaultPath: parsed.vaultPath,
+        pin: parsed.pin,
+        failedAttempts: typeof parsed.failedAttempts === 'number' ? parsed.failedAttempts : 0,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export const api = {
   async chooseVaultFile(create = false): Promise<string | null> {
     if (!hasTauri()) return null;
@@ -262,7 +291,6 @@ export const api = {
     password: string,
     keyfile?: string,
     keepOpen = false,
-    rememberSession?: boolean,
   ): Promise<void> {
     if (hasTauri()) {
       await invoke('open_vault', {
@@ -270,22 +298,15 @@ export const api = {
         password,
         keyfile: keyfile || null,
         keepOpen,
-        rememberSession: rememberSession ?? null,
       });
       return;
     }
-    if (rememberSession !== undefined) {
-      mockConfig = {
-        ...mockConfig,
-        security: { ...mockConfig.security, rememberSession },
-      };
+    const existing = readMockPinSession();
+    if (existing && existing.vaultPath !== path && typeof localStorage !== 'undefined') {
+      localStorage.removeItem(MOCK_PIN_KEY);
     }
     if (typeof localStorage !== 'undefined') {
-      if (mockConfig.security.rememberSession) {
-        localStorage.setItem('bkp.mockSession', path);
-      } else {
-        localStorage.removeItem('bkp.mockSession');
-      }
+      localStorage.setItem('bkp.mockLastVault', path);
     }
   },
   async createVault(
@@ -293,7 +314,6 @@ export const api = {
     password: string,
     name?: string,
     keepOpen = false,
-    rememberSession?: boolean,
   ): Promise<void> {
     if (hasTauri()) {
       await invoke('create_vault', {
@@ -301,40 +321,105 @@ export const api = {
         password,
         name: name || null,
         keepOpen,
-        rememberSession: rememberSession ?? null,
       });
       return;
     }
-    if (rememberSession !== undefined) {
-      mockConfig = {
-        ...mockConfig,
-        security: { ...mockConfig.security, rememberSession },
-      };
-    }
     if (typeof localStorage !== 'undefined') {
-      if (mockConfig.security.rememberSession) {
-        localStorage.setItem('bkp.mockSession', path);
-      } else {
-        localStorage.removeItem('bkp.mockSession');
-      }
+      localStorage.removeItem(MOCK_PIN_KEY);
+      localStorage.setItem('bkp.mockLastVault', path);
     }
   },
-  async restoreSession(): Promise<string | null> {
+  async getPinSessionStatus(): Promise<PinSessionStatus> {
     if (hasTauri()) {
-      return invoke('restore_session');
+      return invoke('get_pin_session_status');
     }
-    if (mockConfig.security.rememberSession && typeof localStorage !== 'undefined') {
-      return localStorage.getItem('bkp.mockSession');
+    const existing = readMockPinSession();
+    if (!existing || existing.failedAttempts >= MOCK_MAX_PIN_ATTEMPTS) {
+      return {
+        hasPin: false,
+        vaultPath: null,
+        failedAttempts: 0,
+        maxAttempts: MOCK_MAX_PIN_ATTEMPTS,
+      };
     }
-    return null;
+    return {
+      hasPin: true,
+      vaultPath: existing.vaultPath,
+      failedAttempts: existing.failedAttempts,
+      maxAttempts: MOCK_MAX_PIN_ATTEMPTS,
+    };
+  },
+  async setSessionPin(pin: string): Promise<void> {
+    if (pin.trim().length < 4) {
+      throw new Error('O PIN deve ter pelo menos 4 caracteres.');
+    }
+    if (hasTauri()) {
+      await invoke('set_session_pin', { pin });
+      return;
+    }
+    if (typeof localStorage !== 'undefined') {
+      const vaultPath = localStorage.getItem('bkp.mockLastVault') || './cofre.kdbx';
+      localStorage.setItem(
+        MOCK_PIN_KEY,
+        JSON.stringify({ vaultPath, pin, failedAttempts: 0 }),
+      );
+    }
+    mockConfig = {
+      ...mockConfig,
+      security: { ...mockConfig.security, rememberSession: true },
+    };
+  },
+  async unlockWithPin(pin: string): Promise<string> {
+    if (hasTauri()) {
+      return invoke('unlock_with_pin', { pin });
+    }
+    const existing = readMockPinSession();
+    if (!existing) {
+      throw new Error('Nenhuma sessão protegida por PIN encontrada.');
+    }
+    if (existing.pin !== pin) {
+      const nextAttempts = existing.failedAttempts + 1;
+      if (typeof localStorage !== 'undefined') {
+        if (nextAttempts >= MOCK_MAX_PIN_ATTEMPTS) {
+          localStorage.removeItem(MOCK_PIN_KEY);
+        } else {
+          localStorage.setItem(
+            MOCK_PIN_KEY,
+            JSON.stringify({ ...existing, failedAttempts: nextAttempts }),
+          );
+        }
+      }
+      if (nextAttempts >= MOCK_MAX_PIN_ATTEMPTS) {
+        throw new Error('PIN incorreto. Limite de tentativas atingido; use a senha mestra.');
+      }
+      throw new Error(
+        `PIN incorreto. Restam ${MOCK_MAX_PIN_ATTEMPTS - nextAttempts} tentativa(s).`,
+      );
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(
+        MOCK_PIN_KEY,
+        JSON.stringify({ ...existing, failedAttempts: 0 }),
+      );
+    }
+    return existing.vaultPath;
+  },
+  async clearSessionPin(): Promise<void> {
+    if (hasTauri()) {
+      await invoke('clear_session_pin');
+      return;
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(MOCK_PIN_KEY);
+    }
+    mockConfig = {
+      ...mockConfig,
+      security: { ...mockConfig.security, rememberSession: false },
+    };
   },
   async lockVault(): Promise<void> {
     if (hasTauri()) {
       await invoke('lock_vault');
-      return;
-    }
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('bkp.mockSession');
     }
   },
   async onVaultLocked(callback: () => void): Promise<() => void> {

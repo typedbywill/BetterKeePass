@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowRight, Clock3, FileKey2, FolderOpen, KeyRound, LockKeyhole, Plus, ShieldCheck } from 'lucide-react';
@@ -11,24 +11,22 @@ import { Button, Checkbox, Input, PasswordInput } from '../ui';
 export function UnlockScreen({ t }: { t: Translations }) {
   const queryClient = useQueryClient();
   const { setUnlocked, recentVaults, addRecentVault } = useUiStore();
-  const configQuery = useQuery({
-    queryKey: ['app-config'],
-    queryFn: () => api.getConfig(),
+  const pinStatusQuery = useQuery({
+    queryKey: ['pin-status'],
+    queryFn: () => api.getPinSessionStatus(),
   });
   const [mode, setMode] = useState<'open' | 'create'>('open');
   const [vaultPath, setVaultPath] = useState(recentVaults[0] || './cofre.kdbx');
   const [password, setPassword] = useState('');
   const [keyfile, setKeyfile] = useState('');
   const [keepOpen, setKeepOpen] = useState(false);
-  const [rememberSession, setRememberSession] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [forceMaster, setForceMaster] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (configQuery.data) {
-      setRememberSession(configQuery.data.security.rememberSession);
-    }
-  }, [configQuery.data]);
+  const hasPinSession = Boolean(pinStatusQuery.data?.hasPin) && !forceMaster;
+  const pinVaultPath = pinStatusQuery.data?.vaultPath ?? vaultPath;
 
   async function browseVault() {
     try {
@@ -50,17 +48,113 @@ export function UnlockScreen({ t }: { t: Translations }) {
     setBusy(true);
     try {
       if (mode === 'open') {
-        await api.openVault(vaultPath, password, keyfile || undefined, keepOpen, rememberSession);
+        await api.openVault(vaultPath, password, keyfile || undefined, keepOpen);
       } else {
-        await api.createVault(vaultPath, password, 'BetterKeePass', keepOpen, rememberSession);
+        await api.createVault(vaultPath, password, 'BetterKeePass', keepOpen);
       }
       setPassword('');
       addRecentVault(vaultPath);
+      await queryClient.invalidateQueries({ queryKey: ['pin-status'] });
       await queryClient.invalidateQueries({ queryKey: ['app-config'] });
       setUnlocked(true, vaultPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBusy(false); }
+  }
+
+  async function handlePinSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const unlockedPath = await api.unlockWithPin(pinInput);
+      setPinInput('');
+      addRecentVault(unlockedPath);
+      setUnlocked(true, unlockedPath);
+    } catch (err) {
+      setPinInput('');
+      await queryClient.invalidateQueries({ queryKey: ['pin-status'] });
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUseMasterPassword() {
+    setError(null);
+    setPinInput('');
+    setForceMaster(true);
+    await api.clearSessionPin();
+    await queryClient.invalidateQueries({ queryKey: ['pin-status'] });
+  }
+
+  if (hasPinSession) {
+    return (
+      <main className="min-h-screen bg-bg text-fg flex flex-col">
+        <header className="flex items-center gap-2.5 px-8 py-6 sm:px-12">
+          <BrandIcon className="h-9 w-9" />
+          <span className="font-semibold tracking-tight">{t.appName}</span>
+        </header>
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="w-full max-w-md mx-auto flex-1 px-8 py-12 flex flex-col justify-center"
+        >
+          <div className="rounded-xl border border-border bg-surface p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-subtle text-accent">
+                <LockKeyhole className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h1 className="text-base font-semibold tracking-tight">{t.pinUnlockTitle}</h1>
+                <p className="text-xs text-fg-subtle truncate font-mono mt-0.5">
+                  {pinVaultPath.split(/[\\/]/).pop() || pinVaultPath}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-fg-muted leading-relaxed mb-5">{t.pinUnlockDesc}</p>
+            <form onSubmit={(e) => void handlePinSubmit(e)} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-fg-muted">
+                {t.pinLabel}
+                <PasswordInput
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  aria-label={t.pinLabel}
+                  revealLabel={t.reveal}
+                  hideLabel={t.hide}
+                  capsLockLabel={t.capsLockOn}
+                  autoFocus
+                  required
+                />
+              </label>
+              {error && (
+                <p role="alert" className="text-xs text-danger bg-danger-subtle border border-danger/25 px-3 py-2 rounded-md">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" variant="primary" size="md" isLoading={busy} className="w-full">
+                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                {t.pinUnlockBtn}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onPress={() => void handleUseMasterPassword()}
+                className="w-full"
+              >
+                {t.useMasterPasswordBtn}
+              </Button>
+            </form>
+          </div>
+        </motion.div>
+        <footer className="flex items-center gap-2 px-8 sm:px-12 py-6 text-xs text-fg-subtle">
+          <ShieldCheck className="h-4 w-4 text-accent shrink-0" aria-hidden="true" />
+          {t.onboardingTip}
+        </footer>
+      </main>
+    );
   }
 
   return (
@@ -122,7 +216,6 @@ export function UnlockScreen({ t }: { t: Translations }) {
                 <span className="flex gap-2"><Input value={keyfile} onChange={e => setKeyfile(e.target.value)} aria-label={t.keyfilePath} leftSlot={<FileKey2 className="h-3.5 w-3.5" aria-hidden="true" />} className="font-mono min-w-0" /><Button type="button" variant="secondary" size="md" onPress={() => void browseKeyfile()} aria-label={t.browseKeyfile}><FolderOpen className="h-4 w-4" /></Button></span>
               </label>}
               <div><Checkbox isSelected={keepOpen} onChange={setKeepOpen}>{t.keepOpen}</Checkbox><p className="mt-1 ml-6 text-xs text-fg-subtle leading-relaxed">{t.keepOpenDesc}</p></div>
-              <div><Checkbox isSelected={rememberSession} onChange={setRememberSession}>{t.rememberSession}</Checkbox><p className="mt-1 ml-6 text-xs text-fg-subtle leading-relaxed">{t.rememberSessionDesc}</p></div>
               {error && <p role="alert" className="text-xs text-danger bg-danger-subtle border border-danger/25 px-3 py-2 rounded-md">{error}</p>}
               <Button type="submit" variant="primary" size="md" isLoading={busy} className="w-full mt-1">{mode === 'open' ? <KeyRound className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}{mode === 'open' ? t.unlockBtn : t.createBtn}</Button>
             </form>

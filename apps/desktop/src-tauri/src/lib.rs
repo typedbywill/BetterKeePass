@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use argon2::{Config as Argon2Config, Variant as Argon2Variant, Version as Argon2Version};
 use base64::Engine as _;
 use bkp_core::{
     AppConfig, BrowserIntegrationConfig, ClipboardConfig, EntryDetails, EntryPatch, EntrySummary,
@@ -16,11 +17,15 @@ use bkp_core::{
 };
 use bkp_platform::ClipboardManager;
 use bkp_protocol::PairedBrowser;
+use chacha20poly1305::{
+    ChaCha20Poly1305, KeyInit, Nonce,
+    aead::{Aead, Payload},
+};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{Emitter, State};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 const MAX_FAVICON_BYTES: u64 = 262_144;
 /// Tempo até tentar de novo um domínio sem favicon.
@@ -150,6 +155,10 @@ fn with_vault_mut<T>(
     f(unlocked)
 }
 
+const MAX_PIN_ATTEMPTS: u32 = 5;
+const PIN_KDF_AAD: &[u8] = b"betterkeepass-pin-kdf-v2";
+const PIN_SESSION_AAD: &[u8] = b"betterkeepass-pin-session-v2";
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionPayload {
@@ -160,11 +169,23 @@ struct PersistedSessionPayload {
 }
 
 #[derive(Serialize, Deserialize)]
-struct EncryptedSessionEnvelope {
+#[serde(rename_all = "camelCase")]
+struct PinEncryptedSession {
     v: u8,
+    vault_path: String,
+    salt: String,
     nonce: String,
-    data: String,
-    tag: String,
+    ciphertext: String,
+    failed_attempts: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PinSessionStatus {
+    has_pin: bool,
+    vault_path: Option<String>,
+    failed_attempts: u32,
+    max_attempts: u32,
 }
 
 fn session_data_dir() -> Option<PathBuf> {
@@ -176,6 +197,10 @@ fn session_data_dir() -> Option<PathBuf> {
     std::env::var("HOME")
         .ok()
         .map(|home| PathBuf::from(home).join(".local/share/betterkeepass"))
+}
+
+fn session_file_path() -> Option<PathBuf> {
+    session_data_dir().map(|dir| dir.join("session.dat"))
 }
 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -206,110 +231,110 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn load_or_create_session_key(dir: &Path) -> Result<[u8; 32], String> {
-    let key_path = dir.join("session.key");
-    if key_path.exists() {
-        let raw = fs::read(&key_path).map_err(|e| e.to_string())?;
-        if raw.len() == 32 {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&raw);
-            return Ok(key);
-        }
+fn derive_pin_key(pin: &str, salt: &[u8; 16]) -> Result<Zeroizing<[u8; 32]>, String> {
+    let config = Argon2Config {
+        variant: Argon2Variant::Argon2id,
+        version: Argon2Version::Version13,
+        mem_cost: 65_536,
+        time_cost: 3,
+        lanes: 4,
+        secret: &[],
+        ad: PIN_KDF_AAD,
+        hash_length: 32,
+        ..Argon2Config::default()
+    };
+    let raw = Zeroizing::new(
+        argon2::hash_raw(pin.as_bytes(), salt, &config).map_err(|e| e.to_string())?,
+    );
+    let mut key = Zeroizing::new([0u8; 32]);
+    if raw.len() != 32 {
+        return Err("falha ao derivar chave do PIN".to_owned());
     }
-    let mut key = [0u8; 32];
-    getrandom::fill(&mut key).map_err(|e| e.to_string())?;
-    write_private_file(&key_path, &key)?;
+    key.copy_from_slice(&raw);
     Ok(key)
 }
 
-fn xor_keystream(key: &[u8; 32], nonce: &[u8; 16], input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(input.len());
-    for (block_idx, chunk) in input.chunks(32).enumerate() {
-        let mut hasher = Sha256::new();
-        hasher.update(key);
-        hasher.update(nonce);
-        hasher.update((block_idx as u32).to_le_bytes());
-        let block = hasher.finalize();
-        for (b, k) in chunk.iter().zip(block.iter()) {
-            out.push(b ^ k);
-        }
-    }
-    out
+fn encrypt_pin_session(payload: &PersistedSessionPayload, pin: &str) -> Result<PinEncryptedSession, String> {
+    let mut salt = [0u8; 16];
+    getrandom::fill(&mut salt).map_err(|e| e.to_string())?;
+    let mut nonce_bytes = [0u8; 12];
+    getrandom::fill(&mut nonce_bytes).map_err(|e| e.to_string())?;
+
+    let key = derive_pin_key(pin, &salt)?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&*key).map_err(|e| e.to_string())?;
+    let plaintext = Zeroizing::new(serde_json::to_vec(payload).map_err(|e| e.to_string())?);
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce_bytes),
+            Payload {
+                msg: plaintext.as_slice(),
+                aad: PIN_SESSION_AAD,
+            },
+        )
+        .map_err(|_| "falha ao criptografar sessão com PIN".to_owned())?;
+
+    Ok(PinEncryptedSession {
+        v: 2,
+        vault_path: payload.path.clone(),
+        salt: base64::engine::general_purpose::STANDARD.encode(salt),
+        nonce: base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
+        ciphertext: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+        failed_attempts: 0,
+    })
 }
 
-fn compute_session_tag(key: &[u8; 32], nonce: &[u8; 16], ciphertext: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(key);
-    hasher.update(nonce);
-    hasher.update(ciphertext);
-    hasher.finalize().into()
-}
-
-fn save_persisted_session(unlocked: &UnlockedVault) -> Result<(), String> {
-    let Some(dir) = session_data_dir() else {
-        return Ok(());
-    };
-    let key = load_or_create_session_key(&dir)?;
-    let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
-
-    let payload = PersistedSessionPayload {
-        path: unlocked.path.to_string_lossy().into_owned(),
-        password: unlocked
-            .master_password
-            .as_ref()
-            .map(|s| s.expose_secret().to_owned())
-            .unwrap_or_default(),
-        keyfile: unlocked
-            .keyfile
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
-        keep_open: unlocked.keep_open,
-    };
-    let plaintext = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-    let ciphertext = xor_keystream(&key, &nonce, &plaintext);
-    let tag = compute_session_tag(&key, &nonce, &ciphertext);
-
-    let envelope = EncryptedSessionEnvelope {
-        v: 1,
-        nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
-        data: base64::engine::general_purpose::STANDARD.encode(&ciphertext),
-        tag: base64::engine::general_purpose::STANDARD.encode(tag),
-    };
-    let serialized = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
-    write_private_file(&dir.join("session.dat"), &serialized)
-}
-
-fn load_persisted_session() -> Option<PersistedSessionPayload> {
-    let dir = session_data_dir()?;
-    let dat_path = dir.join("session.dat");
-    let key_path = dir.join("session.key");
-    if !dat_path.exists() || !key_path.exists() {
-        return None;
+fn decrypt_pin_session(
+    stored: &PinEncryptedSession,
+    pin: &str,
+) -> Result<PersistedSessionPayload, String> {
+    if stored.v != 2 {
+        return Err("formato de sessão inválido".to_owned());
     }
-    let key_bytes = fs::read(&key_path).ok()?;
-    let key: [u8; 32] = key_bytes.try_into().ok()?;
-    let envelope: EncryptedSessionEnvelope =
-        serde_json::from_slice(&fs::read(&dat_path).ok()?).ok()?;
-    if envelope.v != 1 {
-        return None;
-    }
-    let nonce_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&envelope.nonce)
-        .ok()?;
-    let nonce: [u8; 16] = nonce_bytes.try_into().ok()?;
+    let salt_vec = base64::engine::general_purpose::STANDARD
+        .decode(&stored.salt)
+        .map_err(|_| "salt inválido".to_owned())?;
+    let salt: [u8; 16] = salt_vec
+        .try_into()
+        .map_err(|_| "tamanho de salt inválido".to_owned())?;
+    let nonce_vec = base64::engine::general_purpose::STANDARD
+        .decode(&stored.nonce)
+        .map_err(|_| "nonce inválido".to_owned())?;
+    let nonce_bytes: [u8; 12] = nonce_vec
+        .try_into()
+        .map_err(|_| "tamanho de nonce inválido".to_owned())?;
     let ciphertext = base64::engine::general_purpose::STANDARD
-        .decode(&envelope.data)
-        .ok()?;
-    let tag_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&envelope.tag)
-        .ok()?;
-    let expected_tag = compute_session_tag(&key, &nonce, &ciphertext);
-    if tag_bytes.as_slice() != expected_tag {
-        return None;
-    }
-    let plaintext = xor_keystream(&key, &nonce, &ciphertext);
-    serde_json::from_slice(&plaintext).ok()
+        .decode(&stored.ciphertext)
+        .map_err(|_| "dados cifrados inválidos".to_owned())?;
+
+    let key = derive_pin_key(pin, &salt)?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&*key).map_err(|e| e.to_string())?;
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                Nonce::from_slice(&nonce_bytes),
+                Payload {
+                    msg: ciphertext.as_slice(),
+                    aad: PIN_SESSION_AAD,
+                },
+            )
+            .map_err(|_| "PIN incorreto".to_owned())?,
+    );
+    serde_json::from_slice(&plaintext).map_err(|e| e.to_string())
+}
+
+fn read_pin_session_file() -> Option<PinEncryptedSession> {
+    let path = session_file_path()?;
+    let bytes = fs::read(&path).ok()?;
+    let parsed: PinEncryptedSession = serde_json::from_slice(&bytes).ok()?;
+    (parsed.v == 2).then_some(parsed)
+}
+
+fn write_pin_session_file(session: &PinEncryptedSession) -> Result<(), String> {
+    let Some(path) = session_file_path() else {
+        return Err("não foi possível localizar diretório de sessão".to_owned());
+    };
+    let serialized = serde_json::to_vec(session).map_err(|e| e.to_string())?;
+    write_private_file(&path, &serialized)
 }
 
 fn clear_persisted_session() {
@@ -326,9 +351,8 @@ async fn open_vault(
     password: String,
     keyfile: Option<String>,
     keep_open: Option<bool>,
-    remember_session: Option<bool>,
 ) -> Result<(), String> {
-    let pb = PathBuf::from(path);
+    let pb = PathBuf::from(&path);
     let kf = keyfile.map(PathBuf::from);
     let secret = (!password.is_empty()).then(|| SecretString::from(password));
     let vault = {
@@ -343,32 +367,9 @@ async fn open_vault(
         .map_err(|e| e.to_string())?
     };
 
-    let should_remember = {
-        let mut cfg = state
-            .config
-            .lock()
-            .map_err(|_| "falha ao acessar configuração".to_owned())?;
-        if let Some(remember) = remember_session {
-            cfg.security.remember_session = remember;
-            if !cfg.managed_by_nix {
-                let _ = cfg.save();
-            }
-        }
-        cfg.security.remember_session
-    };
-
-    let unlocked = UnlockedVault {
-        vault,
-        path: pb,
-        master_password: secret,
-        keyfile: kf,
-        last_activity: Instant::now(),
-        keep_open: keep_open.unwrap_or(false),
-    };
-
-    if should_remember {
-        let _ = save_persisted_session(&unlocked);
-    } else {
+    if let Some(existing) = read_pin_session_file()
+        && existing.vault_path != path
+    {
         clear_persisted_session();
     }
 
@@ -376,7 +377,14 @@ async fn open_vault(
         .session
         .lock()
         .map_err(|_| "falha ao armazenar cofre".to_owned())?;
-    *guard = Some(unlocked);
+    *guard = Some(UnlockedVault {
+        vault,
+        path: pb,
+        master_password: secret,
+        keyfile: kf,
+        last_activity: Instant::now(),
+        keep_open: keep_open.unwrap_or(false),
+    });
     Ok(())
 }
 
@@ -387,9 +395,8 @@ async fn create_vault(
     password: String,
     name: Option<String>,
     keep_open: Option<bool>,
-    remember_session: Option<bool>,
 ) -> Result<(), String> {
-    let pb = PathBuf::from(path);
+    let pb = PathBuf::from(&path);
     let secret = Some(SecretString::from(password));
     let vault = {
         let pb_clone = pb.clone();
@@ -405,68 +412,133 @@ async fn create_vault(
         .map_err(|e| e.to_string())??
     };
 
-    let should_remember = {
-        let mut cfg = state
-            .config
-            .lock()
-            .map_err(|_| "falha ao acessar configuração".to_owned())?;
-        if let Some(remember) = remember_session {
-            cfg.security.remember_session = remember;
-            if !cfg.managed_by_nix {
-                let _ = cfg.save();
-            }
-        }
-        cfg.security.remember_session
-    };
+    clear_persisted_session();
 
-    let unlocked = UnlockedVault {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
+    *guard = Some(UnlockedVault {
         vault,
         path: pb,
         master_password: secret,
         keyfile: None,
         last_activity: Instant::now(),
         keep_open: keep_open.unwrap_or(false),
-    };
-
-    if should_remember {
-        let _ = save_persisted_session(&unlocked);
-    } else {
-        clear_persisted_session();
-    }
-
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
-    *guard = Some(unlocked);
+    });
     Ok(())
 }
 
 #[tauri::command]
-async fn restore_session(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    if let Ok(guard) = state.session.lock()
-        && let Some(unlocked) = guard.as_ref()
-    {
-        return Ok(Some(unlocked.path.to_string_lossy().into_owned()));
+fn get_pin_session_status() -> PinSessionStatus {
+    match read_pin_session_file() {
+        Some(stored) if stored.failed_attempts < MAX_PIN_ATTEMPTS => PinSessionStatus {
+            has_pin: true,
+            vault_path: Some(stored.vault_path),
+            failed_attempts: stored.failed_attempts,
+            max_attempts: MAX_PIN_ATTEMPTS,
+        },
+        _ => PinSessionStatus {
+            has_pin: false,
+            vault_path: None,
+            failed_attempts: 0,
+            max_attempts: MAX_PIN_ATTEMPTS,
+        },
+    }
+}
+
+#[tauri::command]
+async fn set_session_pin(state: State<'_, AppState>, pin: String) -> Result<(), String> {
+    if pin.trim().len() < 4 {
+        return Err("o PIN deve ter pelo menos 4 caracteres".to_owned());
     }
 
-    let should_remember = state
-        .config
-        .lock()
-        .map(|c| c.security.remember_session)
-        .unwrap_or(false);
-    if !should_remember {
-        return Ok(None);
-    }
-
-    let Some(saved) = load_persisted_session() else {
-        return Ok(None);
+    let payload = {
+        let guard = state
+            .session
+            .lock()
+            .map_err(|_| "falha ao acessar sessão do cofre".to_owned())?;
+        let Some(unlocked) = guard.as_ref() else {
+            return Err("cofre bloqueado".to_owned());
+        };
+        PersistedSessionPayload {
+            path: unlocked.path.to_string_lossy().into_owned(),
+            password: unlocked
+                .master_password
+                .as_ref()
+                .map(|s| s.expose_secret().to_owned())
+                .unwrap_or_default(),
+            keyfile: unlocked
+                .keyfile
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+            keep_open: unlocked.keep_open,
+        }
     };
 
-    let pb = PathBuf::from(&saved.path);
-    let kf = saved.keyfile.as_deref().map(PathBuf::from);
-    let secret = (!saved.password.is_empty()).then(|| SecretString::from(saved.password));
-    let opened = {
+    let encrypted = tauri::async_runtime::spawn_blocking(move || encrypt_pin_session(&payload, &pin))
+        .await
+        .map_err(|e| e.to_string())??;
+    write_pin_session_file(&encrypted)?;
+
+    if let Ok(mut cfg) = state.config.lock() {
+        cfg.security.remember_session = true;
+        if !cfg.managed_by_nix {
+            let _ = cfg.save();
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn unlock_with_pin(state: State<'_, AppState>, pin: String) -> Result<String, String> {
+    let mut stored = read_pin_session_file()
+        .ok_or_else(|| "nenhuma sessão protegida por PIN encontrada".to_owned())?;
+
+    if stored.failed_attempts >= MAX_PIN_ATTEMPTS {
+        clear_persisted_session();
+        return Err("limite de tentativas excedido; use a senha mestra".to_owned());
+    }
+
+    let decrypted = {
+        let stored_clone = PinEncryptedSession {
+            v: stored.v,
+            vault_path: stored.vault_path.clone(),
+            salt: stored.salt.clone(),
+            nonce: stored.nonce.clone(),
+            ciphertext: stored.ciphertext.clone(),
+            failed_attempts: stored.failed_attempts,
+        };
+        let pin_clone = pin.clone();
+        tauri::async_runtime::spawn_blocking(move || decrypt_pin_session(&stored_clone, &pin_clone))
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    let payload = match decrypted {
+        Ok(p) => p,
+        Err(_) => {
+            stored.failed_attempts += 1;
+            if stored.failed_attempts >= MAX_PIN_ATTEMPTS {
+                clear_persisted_session();
+                return Err("PIN incorreto. Limite de tentativas atingido; use a senha mestra.".to_owned());
+            }
+            let _ = write_pin_session_file(&stored);
+            let remaining = MAX_PIN_ATTEMPTS - stored.failed_attempts;
+            return Err(format!("PIN incorreto. Restam {remaining} tentativa(s)."));
+        }
+    };
+
+    if stored.failed_attempts > 0 {
+        stored.failed_attempts = 0;
+        let _ = write_pin_session_file(&stored);
+    }
+
+    let pb = PathBuf::from(&payload.path);
+    let kf = payload.keyfile.as_deref().map(PathBuf::from);
+    let secret = (!payload.password.is_empty()).then(|| SecretString::from(payload.password));
+    let vault = {
         let pb_clone = pb.clone();
         let kf_clone = kf.clone();
         let secret_clone = secret.clone();
@@ -475,29 +547,34 @@ async fn restore_session(state: State<'_, AppState>) -> Result<Option<String>, S
         })
         .await
         .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
     };
 
-    match opened {
-        Ok(vault) => {
-            let mut guard = state
-                .session
-                .lock()
-                .map_err(|_| "falha ao armazenar cofre".to_owned())?;
-            *guard = Some(UnlockedVault {
-                vault,
-                path: pb,
-                master_password: secret,
-                keyfile: kf,
-                last_activity: Instant::now(),
-                keep_open: saved.keep_open,
-            });
-            Ok(Some(saved.path))
-        }
-        Err(_) => {
-            clear_persisted_session();
-            Ok(None)
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
+    *guard = Some(UnlockedVault {
+        vault,
+        path: pb,
+        master_password: secret,
+        keyfile: kf,
+        last_activity: Instant::now(),
+        keep_open: payload.keep_open,
+    });
+    Ok(payload.path)
+}
+
+#[tauri::command]
+fn clear_session_pin(state: State<'_, AppState>) -> Result<(), String> {
+    clear_persisted_session();
+    if let Ok(mut cfg) = state.config.lock() {
+        cfg.security.remember_session = false;
+        if !cfg.managed_by_nix {
+            let _ = cfg.save();
         }
     }
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -507,7 +584,6 @@ fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|_| "falha ao bloquear cofre".to_owned())?;
     *guard = None;
-    clear_persisted_session();
     Ok(())
 }
 
@@ -848,7 +924,7 @@ fn set_app_config(
     state: State<'_, AppState>,
     patch: AppConfigPatch,
 ) -> Result<SetUiConfigResult, String> {
-    let remember_changed = {
+    let remember_disabled = {
         let mut guard = state
             .config
             .lock()
@@ -876,20 +952,11 @@ fn set_app_config(
             guard.ssh_agent = ssh_agent;
         }
         guard.save().map_err(|e| e.to_string())?;
-        let next_remember = guard.security.remember_session;
-        (prev_remember != next_remember).then_some(next_remember)
+        prev_remember && !guard.security.remember_session
     };
 
-    if let Some(remember) = remember_changed {
-        if remember {
-            if let Ok(guard) = state.session.lock()
-                && let Some(unlocked) = guard.as_ref()
-            {
-                let _ = save_persisted_session(unlocked);
-            }
-        } else {
-            clear_persisted_session();
-        }
+    if remember_disabled {
+        clear_persisted_session();
     }
 
     Ok(SetUiConfigResult { persisted: true })
@@ -1129,7 +1196,6 @@ pub fn run() {
                         && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
                     {
                         *guard = None;
-                        clear_persisted_session();
                         true
                     } else {
                         false
@@ -1144,7 +1210,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_vault,
             create_vault,
-            restore_session,
+            get_pin_session_status,
+            set_session_pin,
+            unlock_with_pin,
+            clear_session_pin,
             lock_vault,
             search_entries,
             get_group_tree,

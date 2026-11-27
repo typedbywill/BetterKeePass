@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Info, Monitor, Moon, Sun } from 'lucide-react';
+import { PinSetupDialog } from './PinSetupDialog';
 import type { Language } from '../i18n';
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
@@ -41,9 +42,15 @@ export function SettingsView({ t }: { t: Translations }) {
     queryFn: () => api.listPairedBrowsers(),
   });
 
+  const pinStatusQuery = useQuery({
+    queryKey: ['pin-status'],
+    queryFn: () => api.getPinSessionStatus(),
+  });
+
   const managed = configQuery.data?.managedByNix ?? false;
   const previewDark = resolveDark(theme);
 
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [lockSecondsDraft, setLockSecondsDraft] = useState('300');
   const [clipboardSecondsDraft, setClipboardSecondsDraft] = useState('15');
 
@@ -253,19 +260,37 @@ export function SettingsView({ t }: { t: Translations }) {
               <>
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                   <div className="min-w-0">
-                    <p className="text-[13px] text-fg">{t.rememberSession}</p>
-                    <p className="text-xs text-fg-muted mt-0.5">{t.rememberSessionDesc}</p>
+                    <p className="text-[13px] text-fg">{t.pinSettingsLabel}</p>
+                    <p className="text-xs text-fg-muted mt-0.5">
+                      {pinStatusQuery.data?.hasPin
+                        ? t.pinSettingsActiveDesc
+                        : t.pinSettingsInactiveDesc}
+                    </p>
                   </div>
-                  <Switch
-                    isSelected={configQuery.data.security.rememberSession}
-                    onChange={(rememberSession) =>
-                      void savePatch({
-                        security: { ...configQuery.data!.security, rememberSession },
-                      })
-                    }
-                    isDisabled={managed}
-                    aria-label={t.rememberSession}
-                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      onPress={() => setPinDialogOpen(true)}
+                    >
+                      {pinStatusQuery.data?.hasPin ? t.pinChangeBtn : t.pinConfigureBtn}
+                    </Button>
+                    {pinStatusQuery.data?.hasPin && (
+                      <Button
+                        size="xs"
+                        variant="danger"
+                        onPress={() => {
+                          void api.clearSessionPin().then(async () => {
+                            await queryClient.invalidateQueries({ queryKey: ['pin-status'] });
+                            await queryClient.invalidateQueries({ queryKey: ['app-config'] });
+                            pushToast({ kind: 'info', title: t.pinClearedToast });
+                          });
+                        }}
+                      >
+                        {t.pinRemoveBtn}
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="px-4 py-3 flex flex-col gap-2.5">
@@ -505,6 +530,7 @@ export function SettingsView({ t }: { t: Translations }) {
           </div>
         </div>
       </div>
+      <PinSetupDialog t={t} isOpen={pinDialogOpen} onOpenChange={setPinDialogOpen} />
     </section>
   );
 }

@@ -22,6 +22,13 @@ async function unlockDemoVault() {
   await waitFor(() => {
     expect(screen.getByText('GitHub')).toBeInTheDocument();
   });
+  const skipPin = await screen.findByRole('button', { name: /Agora não/i });
+  fireEvent.click(skipPin);
+  await waitFor(() => {
+    expect(
+      screen.queryByRole('dialog', { name: /Criar PIN de desbloqueio/i }),
+    ).not.toBeInTheDocument();
+  });
 }
 
 describe('BetterKeePass Desktop UI', () => {
@@ -379,18 +386,38 @@ describe('BetterKeePass Desktop UI', () => {
     openSpy.mockRestore();
   });
 
-  it('remembers session across app restarts when enabled on unlock', async () => {
+  it('creates a PIN after unlocking and unlocks with PIN after app restart', async () => {
     const first = renderApp();
-    const rememberCheckbox = screen.getByRole('checkbox', {
-      name: /Manter conectado ao fechar o app/i,
+    fireEvent.click(screen.getByRole('button', { name: /Desbloquear cofre/i }));
+    await waitFor(() => {
+      expect(screen.getByText('GitHub')).toBeInTheDocument();
     });
-    fireEvent.click(rememberCheckbox);
-    await unlockDemoVault();
+
+    const pinDialog = await screen.findByRole('dialog', { name: /Criar PIN de desbloqueio/i });
+    const pinField = within(pinDialog).getByLabelText(/PIN \(mínimo 4 caracteres\)/i);
+    const confirmField = within(pinDialog).getByLabelText(/Confirmar PIN/i);
+    fireEvent.change(pinField, { target: { value: '2580' } });
+    fireEvent.change(confirmField, { target: { value: '2580' } });
+    fireEvent.click(within(pinDialog).getByRole('button', { name: /Salvar PIN/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Criar PIN de desbloqueio/i })).not.toBeInTheDocument();
+    });
     first.unmount();
 
-    // Simulate reopening the app with unlocked = false
+    // Simulate closing and reopening the app
     useUiStore.setState({ unlocked: false, configHydrated: false });
     renderApp();
+
+    const pinUnlockInput = await screen.findByLabelText(/PIN \(mínimo 4 caracteres\)/i);
+    fireEvent.change(pinUnlockInput, { target: { value: '0000' } });
+    fireEvent.click(screen.getByRole('button', { name: /Desbloquear com PIN/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/PIN incorreto/i);
+
+    fireEvent.change(screen.getByLabelText(/PIN \(mínimo 4 caracteres\)/i), {
+      target: { value: '2580' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Desbloquear com PIN/i }));
 
     await waitFor(() => {
       expect(screen.getByText('GitHub')).toBeInTheDocument();
