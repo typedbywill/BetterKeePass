@@ -82,6 +82,8 @@ in
     );
     fmt = craneLib.cargoFmt {
       inherit src;
+      pname = "betterkeepass";
+      version = "0.1.0";
     };
     test = craneLib.cargoTest (
       commonArgs
@@ -90,10 +92,12 @@ in
       }
     );
     # `advisories` exige rede para baixar o advisory-db e não roda no sandbox Nix;
-    # a auditoria de vulnerabilidades roda fora do sandbox via `cargo audit` / CI.
+    # por padrão o crane roda apenas `check bans licenses sources`.
+    # A auditoria de vulnerabilidades roda fora do sandbox via `cargo audit` / CI.
     deny = craneLib.cargoDeny {
       inherit src;
-      cargoDenyExtraArgs = "licenses bans sources";
+      pname = "betterkeepass";
+      version = "0.1.0";
     };
   };
 }
