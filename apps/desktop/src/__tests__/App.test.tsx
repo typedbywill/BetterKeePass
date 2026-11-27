@@ -32,6 +32,7 @@ describe('BetterKeePass Desktop UI', () => {
   beforeEach(async () => {
     localStorage.clear();
     document.documentElement.classList.remove('dark');
+    document.documentElement.removeAttribute('data-theme');
     await api.setUiConfig({
       theme: 'system',
       language: 'pt-BR',
@@ -260,5 +261,52 @@ describe('BetterKeePass Desktop UI', () => {
       });
     });
     updateSpy.mockRestore();
+  });
+
+  it('applies custom themes in Settings and sets data-theme and .dark appropriately', async () => {
+    renderApp();
+    await unlockDemoVault();
+
+    fireEvent.click(screen.getByRole('button', { name: /Configurações/i }));
+
+    const tokyoNightBtn = await screen.findByRole('button', { name: 'Tokyo Night' });
+    fireEvent.click(tokyoNightBtn);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(tokyoNightBtn).toHaveAttribute('aria-pressed', 'true');
+
+    const latteBtn = screen.getByRole('button', { name: 'Catppuccin Latte' });
+    fireEvent.click(latteBtn);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('catppuccin-latte');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(latteBtn).toHaveAttribute('aria-pressed', 'true');
+
+    const settings = screen.getByRole('region', { name: 'Configurações' });
+    const lightRadio = within(settings).getByRole('radio', { name: 'Claro' });
+    fireEvent.click(lightRadio);
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  it('displays minimalist icon indicators for entry fields in the entry list', async () => {
+    renderApp();
+    await unlockDemoVault();
+
+    const entryList = screen.getByRole('region', { name: 'Lista de entradas' });
+    const githubRow = within(entryList).getByText('GitHub').closest('li')!;
+    expect(within(githubRow).getByLabelText('Usuário')).toBeInTheDocument();
+    expect(within(githubRow).getByLabelText('Senha')).toBeInTheDocument();
+    expect(within(githubRow).getByLabelText('TOTP')).toBeInTheDocument();
+    expect(within(githubRow).getByLabelText('Passkey')).toBeInTheDocument();
+    expect(within(githubRow).getByLabelText('Notas')).toBeInTheDocument();
+    expect(within(githubRow).getByLabelText('URL')).toBeInTheDocument();
+
+    const protonRow = within(entryList).getByText('Proton Mail').closest('li')!;
+    expect(within(protonRow).getByLabelText('Usuário')).toBeInTheDocument();
+    expect(within(protonRow).getByLabelText('Senha')).toBeInTheDocument();
+    expect(within(protonRow).getByLabelText('Notas')).toBeInTheDocument();
+    expect(within(protonRow).getByLabelText('URL')).toBeInTheDocument();
+    expect(within(protonRow).queryByLabelText('TOTP')).not.toBeInTheDocument();
+    expect(within(protonRow).queryByLabelText('Passkey')).not.toBeInTheDocument();
   });
 });

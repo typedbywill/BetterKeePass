@@ -153,18 +153,16 @@ export function CommandPalette({
           setCommandPaletteOpen(false);
         },
       },
-      ...CUSTOM_THEMES.map(
-        (customTheme): PaletteItem => ({
-          kind: 'command',
-          id: `theme-${customTheme.id}`,
-          label: `${t.themeLabel}: ${customTheme.name}`,
-          icon: <Palette className="h-3.5 w-3.5" aria-hidden="true" />,
-          run: () => {
-            setTheme(customTheme.id);
-            setCommandPaletteOpen(false);
-          },
-        }),
-      ),
+      ...CUSTOM_THEMES.map((customTheme) => ({
+        kind: 'command' as const,
+        id: `theme-${customTheme.id}`,
+        label: `${t.themeLabel}: ${customTheme.name}`,
+        icon: <Palette className="h-3.5 w-3.5" aria-hidden="true" />,
+        run: () => {
+          setTheme(customTheme.id);
+          setCommandPaletteOpen(false);
+        },
+      })),
       {
         kind: 'command',
         id: 'shortcuts',

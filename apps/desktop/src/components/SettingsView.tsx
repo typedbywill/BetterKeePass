@@ -159,65 +159,6 @@ export function SettingsView({ t }: { t: Translations }) {
               />
             </div>
 
-            <div className="px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-[13px] text-fg">{t.customThemesLabel}</p>
-                <p className="text-xs text-fg-muted mt-0.5">{t.customThemesDesc}</p>
-              </div>
-              <div
-                role="group"
-                aria-label={t.customThemesLabel}
-                className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3"
-              >
-                {CUSTOM_THEMES.map((item) => {
-                  const active = theme === item.id;
-                  const [bg, surface, accent, fg] = item.swatches;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      disabled={managed}
-                      aria-pressed={active}
-                      onClick={() => setTheme(item.id)}
-                      className={cn(
-                        'group flex flex-col gap-2 rounded-lg border p-2 text-left transition-colors outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-ring',
-                        active
-                          ? 'border-accent bg-accent-subtle ring-1 ring-accent'
-                          : 'border-border bg-bg-subtle hover:bg-surface-hover hover:border-border-strong',
-                      )}
-                    >
-                      <div
-                        className="flex h-7 w-full items-center justify-between rounded-md border px-2"
-                        style={{
-                          backgroundColor: bg,
-                          borderColor: surface,
-                        }}
-                      >
-                        <div className="flex items-center gap-1">
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: surface }}
-                          />
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: accent }}
-                          />
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: fg }}
-                          />
-                        </div>
-                        {active && (
-                          <Check className="h-3.5 w-3.5 shrink-0" style={{ color: accent }} aria-hidden="true" />
-                        )}
-                      </div>
-                      <span className="truncate text-xs font-medium text-fg">{item.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             <div className="flex items-center justify-between gap-4 px-4 py-3">
               <div className="min-w-0">
                 <p className="text-[13px] text-fg">{t.faviconsLabel}</p>

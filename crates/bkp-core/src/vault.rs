@@ -44,6 +44,18 @@ pub struct EntrySummary {
     /// UUID do ícone customizado embutido no cofre, quando definido.
     #[serde(default)]
     pub custom_icon_uuid: Option<Uuid>,
+    /// Indica se a entrada possui senha preenchida.
+    #[serde(default)]
+    pub has_password: bool,
+    /// Indica se a entrada possui configuração TOTP/OTP.
+    #[serde(default)]
+    pub has_otp: bool,
+    /// Indica se a entrada possui uma Passkey associada.
+    #[serde(default)]
+    pub has_passkey: bool,
+    /// Indica se a entrada possui notas preenchidas.
+    #[serde(default)]
+    pub has_notes: bool,
 }
 
 /// Nó da árvore de grupos para exibição em UI e CLI.
@@ -879,6 +891,20 @@ fn extract_icon_meta(icon: Option<&Icon>) -> (Option<usize>, Option<Uuid>) {
 
 fn summarize_entry(entry: &EntryRef<'_>, group_path: &str) -> EntrySummary {
     let (icon_id, custom_icon_uuid) = extract_icon_meta(entry.icon());
+    let has_password = entry.get_password().is_some_and(|p| !p.is_empty());
+    let has_otp = entry.get_raw_otp_value().is_some()
+        || entry
+            .tags
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("otp") || t.eq_ignore_ascii_case("totp"));
+    let has_passkey = entry.tags.iter().any(|t| t.eq_ignore_ascii_case("Passkey"))
+        || entry
+            .get("KPEX_PASSKEY_CREDENTIAL_ID")
+            .is_some_and(|v| !v.is_empty());
+    let has_notes = entry
+        .get(fields::NOTES)
+        .is_some_and(|n| !n.trim().is_empty());
+
     EntrySummary {
         uuid: entry.id().uuid(),
         title: entry.get_title().unwrap_or_default().to_owned(),
@@ -888,6 +914,10 @@ fn summarize_entry(entry: &EntryRef<'_>, group_path: &str) -> EntrySummary {
         group_path: group_path.to_owned(),
         icon_id,
         custom_icon_uuid,
+        has_password,
+        has_otp,
+        has_passkey,
+        has_notes,
     }
 }
 

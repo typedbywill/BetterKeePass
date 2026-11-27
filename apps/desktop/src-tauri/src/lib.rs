@@ -30,6 +30,7 @@ struct UnlockedVault {
     master_password: Option<SecretString>,
     keyfile: Option<PathBuf>,
     last_activity: Instant,
+    keep_open: bool,
 }
 
 struct AppState {
@@ -136,6 +137,7 @@ async fn open_vault(
     path: String,
     password: String,
     keyfile: Option<String>,
+    keep_open: Option<bool>,
 ) -> Result<(), String> {
     let pb = PathBuf::from(path);
     let kf = keyfile.map(PathBuf::from);
@@ -161,6 +163,7 @@ async fn open_vault(
         master_password: secret,
         keyfile: kf,
         last_activity: Instant::now(),
+        keep_open: keep_open.unwrap_or(false),
     });
     Ok(())
 }
@@ -171,6 +174,7 @@ async fn create_vault(
     path: String,
     password: String,
     name: Option<String>,
+    keep_open: Option<bool>,
 ) -> Result<(), String> {
     let pb = PathBuf::from(path);
     let secret = Some(SecretString::from(password));
@@ -197,6 +201,7 @@ async fn create_vault(
         master_password: secret,
         keyfile: None,
         last_activity: Instant::now(),
+        keep_open: keep_open.unwrap_or(false),
     });
     Ok(())
 }
@@ -747,6 +752,7 @@ pub fn run() {
             std::thread::sleep(Duration::from_secs(5));
             if let Ok(mut guard) = watcher_session.lock()
                 && let Some(unlocked) = guard.as_ref()
+                && !unlocked.keep_open
                 && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
             {
                 *guard = None;
@@ -762,6 +768,7 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             open_vault,

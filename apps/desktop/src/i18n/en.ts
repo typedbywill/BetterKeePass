@@ -2,6 +2,16 @@ import type { Translations } from './pt-BR';
 
 export const en: Translations = {
   appName: 'BetterKeePass',
+  welcomeTitle: 'Your secure space, your way.',
+  welcomeDesc: 'Open your vault to access your passwords and passkeys, or create a new one to get started.',
+  browseVault: 'Browse files',
+  browseKeyfile: 'Browse key file',
+  noRecentVaults: 'Your recently opened vaults will appear here.',
+  selectedVault: 'Vault file',
+  keepOpen: 'Keep unlocked for this session',
+  keepOpenDesc: 'Disables inactivity locking until you close or manually lock the vault.',
+  yourVaults: 'YOUR VAULTS',
+  localOnly: 'YOUR DATA, ON YOUR DEVICE',
   subtitle: 'Password & passkey vault compatible with KeePassXC and NixOS',
   unlockTitle: 'Open vault',
   createTitle: 'Create new vault',

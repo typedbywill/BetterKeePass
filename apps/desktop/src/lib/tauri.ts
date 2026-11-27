@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { open, save } from '@tauri-apps/plugin-dialog';
 
 export interface EntrySummary {
   uuid: string;
@@ -9,6 +10,10 @@ export interface EntrySummary {
   groupPath: string;
   iconId?: number | null;
   customIconUuid?: string | null;
+  hasPassword?: boolean;
+  hasOtp?: boolean;
+  hasPasskey?: boolean;
+  hasNotes?: boolean;
 }
 
 export interface GroupNode {
@@ -131,6 +136,10 @@ const mockEntries: (EntryDetailsView & { _secret: string })[] = [
       url: 'https://github.com',
       tags: ['Passkey', 'Dev'],
       groupPath: 'Desenvolvimento',
+      hasPassword: true,
+      hasOtp: true,
+      hasPasskey: true,
+      hasNotes: true,
     },
     notes: 'Passkey ES256 armazenada no KDBX',
     hasOtp: true,
@@ -149,6 +158,10 @@ const mockEntries: (EntryDetailsView & { _secret: string })[] = [
       url: 'https://mail.proton.me',
       tags: ['Email'],
       groupPath: 'Pessoal',
+      hasPassword: true,
+      hasOtp: false,
+      hasPasskey: false,
+      hasNotes: true,
     },
     notes: 'Conta principal',
     hasOtp: false,
@@ -191,14 +204,23 @@ let mockBrowsers: PairedBrowser[] = [
 ];
 
 export const api = {
-  async openVault(path: string, password: string, keyfile?: string): Promise<void> {
+  async chooseVaultFile(create = false): Promise<string | null> {
+    if (!hasTauri()) return null;
+    const options = { filters: [{ name: "KeePass", extensions: ["kdbx"] }] };
+    return create ? save({ ...options, defaultPath: "cofre.kdbx" }) : open({ ...options, multiple: false });
+  },
+  async chooseKeyFile(): Promise<string | null> {
+    if (!hasTauri()) return null;
+    return open({ multiple: false });
+  },
+  async openVault(path: string, password: string, keyfile?: string, keepOpen = false): Promise<void> {
     if (hasTauri()) {
-      await invoke('open_vault', { path, password, keyfile: keyfile || null });
+      await invoke('open_vault', { path, password, keyfile: keyfile || null, keepOpen });
     }
   },
-  async createVault(path: string, password: string, name?: string): Promise<void> {
+  async createVault(path: string, password: string, name?: string, keepOpen = false): Promise<void> {
     if (hasTauri()) {
-      await invoke('create_vault', { path, password, name: name || null });
+      await invoke('create_vault', { path, password, name: name || null, keepOpen });
     }
   },
   async lockVault(): Promise<void> {
@@ -362,6 +384,10 @@ export const api = {
         url: payload.url ?? '',
         tags: payload.tags,
         groupPath: payload.groupPath ?? '',
+        hasPassword: Boolean(payload.password),
+        hasOtp: payload.tags.some((t) => t.toLowerCase() === 'otp' || t.toLowerCase() === 'totp'),
+        hasPasskey: payload.tags.some((t) => t.toLowerCase() === 'passkey'),
+        hasNotes: Boolean(payload.notes?.trim()),
       },
       notes: payload.notes ?? '',
       hasOtp: false,
@@ -388,9 +414,18 @@ export const api = {
     if (patch.title !== undefined) found.summary.title = patch.title;
     if (patch.username !== undefined) found.summary.username = patch.username;
     if (patch.url !== undefined) found.summary.url = patch.url;
-    if (patch.tags !== undefined) found.summary.tags = patch.tags;
-    if (patch.notes !== undefined) found.notes = patch.notes;
-    if (patch.password !== undefined) found._secret = patch.password;
+    if (patch.tags !== undefined) {
+      found.summary.tags = patch.tags;
+      found.summary.hasPasskey = patch.tags.some((t) => t.toLowerCase() === 'passkey');
+    }
+    if (patch.notes !== undefined) {
+      found.notes = patch.notes;
+      found.summary.hasNotes = patch.notes.trim().length > 0;
+    }
+    if (patch.password !== undefined) {
+      found._secret = patch.password;
+      found.summary.hasPassword = patch.password.length > 0;
+    }
     if (patch.customIconBase64 !== undefined) {
       found.summary.customIconUuid = `mock-icon-${uuid}`;
     } else if (patch.iconId !== undefined) {

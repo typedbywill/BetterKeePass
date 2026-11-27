@@ -4,8 +4,11 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  FileText,
   FolderOpen,
+  Globe,
   KeyRound,
+  Lock,
   MoreHorizontal,
   Plus,
   SearchX,
@@ -18,7 +21,6 @@ import { api, type EntrySummary } from '../lib/tauri';
 import { useUiStore } from '../store/ui';
 import {
   Avatar,
-  Badge,
   Button,
   EmptyState,
   IconButton,
@@ -77,10 +79,26 @@ const EntryRow = memo(function EntryRow({
     });
   }
 
-  const isPasskey = entry.tags.includes('Passkey');
-  const hasOtpTag = entry.tags.some(
-    (tag) => tag.toLowerCase() === 'otp' || tag.toLowerCase() === 'totp',
-  );
+  const hasUsername = Boolean(entry.username);
+  const hasPassword = Boolean(entry.hasPassword);
+  const hasTotp =
+    Boolean(entry.hasOtp) ||
+    entry.tags.some((tag) => tag.toLowerCase() === 'otp' || tag.toLowerCase() === 'totp');
+  const hasPasskey =
+    Boolean(entry.hasPasskey) ||
+    entry.tags.some((tag) => tag.toLowerCase() === 'passkey');
+  const hasNotes = Boolean(entry.hasNotes);
+  const hasUrl = Boolean(entry.url);
+
+  const indicators = [
+    hasUsername && { key: 'username', label: t.usernameLabel, Icon: User },
+    hasPassword && { key: 'password', label: t.passwordLabel, Icon: Lock },
+    hasTotp && { key: 'totp', label: 'TOTP', Icon: Clock },
+    hasPasskey && { key: 'passkey', label: 'Passkey', Icon: KeyRound },
+    hasNotes && { key: 'notes', label: t.notesLabel, Icon: FileText },
+    hasUrl && { key: 'url', label: t.urlLabel, Icon: Globe },
+  ].filter(Boolean) as Array<{ key: string; label: string; Icon: typeof User }>;
+
   const subtitle = presentationMode
     ? '••••••'
     : entry.username || entry.url || entry.groupPath || '—';
@@ -125,21 +143,29 @@ const EntryRow = memo(function EntryRow({
               <span className="font-medium text-[13px] text-fg truncate">
                 <HighlightMatch text={entry.title} query={searchQuery} />
               </span>
-              {isPasskey && (
-                <Badge variant="accent" className="shrink-0">
-                  <KeyRound className="h-2.5 w-2.5" aria-hidden="true" />
-                  Passkey
-                </Badge>
-              )}
-              {hasOtpTag && (
-                <Badge variant="neutral" className="shrink-0">
-                  OTP
-                </Badge>
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-0.5">
+              <p className="text-xs text-fg-muted truncate">
+                <HighlightMatch text={subtitle} query={searchQuery} />
+              </p>
+              {indicators.length > 0 && (
+                <div
+                  className="flex items-center gap-1 shrink-0 text-fg-subtle group-hover:opacity-0 transition-opacity"
+                  aria-label={indicators.map((i) => i.label).join(', ')}
+                >
+                  {indicators.map(({ key, label, Icon }) => (
+                    <span
+                      key={key}
+                      title={label}
+                      aria-label={label}
+                      className="inline-flex items-center justify-center"
+                    >
+                      <Icon className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
-            <p className="text-xs text-fg-muted truncate mt-0.5">
-              <HighlightMatch text={subtitle} query={searchQuery} />
-            </p>
           </div>
         </button>
 

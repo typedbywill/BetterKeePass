@@ -238,6 +238,14 @@ export function EntryDetail({
                 username: patch.username ?? item.username,
                 url: patch.url ?? item.url,
                 tags: patch.tags ?? item.tags,
+                hasPassword:
+                  patch.password !== undefined ? patch.password.length > 0 : item.hasPassword,
+                hasNotes:
+                  patch.notes !== undefined ? patch.notes.trim().length > 0 : item.hasNotes,
+                hasPasskey:
+                  patch.tags !== undefined
+                    ? patch.tags.some((tag) => tag.toLowerCase() === 'passkey')
+                    : item.hasPasskey,
               }
             : item,
         ),

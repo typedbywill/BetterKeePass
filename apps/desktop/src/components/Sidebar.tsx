@@ -18,10 +18,10 @@ import {
   Plus,
   Search,
   Settings,
-  Shield,
   Sun,
   Trash2,
 } from 'lucide-react';
+import { BrandIcon } from './BrandIcon';
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
 import { getKeepassIcon } from '../lib/keepassIcons';
@@ -423,9 +423,7 @@ export function Sidebar({
         >
           {!sidebarCollapsed && (
             <div className="flex items-center gap-2 min-w-0">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-subtle text-accent border border-accent/25">
-                <Shield className="h-3.5 w-3.5" aria-hidden="true" />
-              </div>
+              <BrandIcon className="h-6 w-6 shrink-0" />
               <span className="font-semibold text-[13px] tracking-tight truncate">
                 {t.appName}
               </span>
