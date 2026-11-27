@@ -2,22 +2,24 @@ use std::{
     fs,
     io::Read,
     net::IpAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use base64::Engine as _;
 use bkp_core::{
-    AppConfig, ClipboardConfig, EntryDetails, EntryPatch, EntrySummary, GroupNode, HealthReport,
-    HistoryEntrySummary, NewEntry, OtpCode, PasswordOptions, SecurityConfig, UiConfig, Vault,
-    analyze_health, generate_passphrase, generate_password,
+    AppConfig, BrowserIntegrationConfig, ClipboardConfig, EntryDetails, EntryPatch, EntrySummary,
+    GroupNode, HealthReport, HistoryEntrySummary, NewEntry, OtpCode, PasswordOptions,
+    SecretServiceConfig, SecurityConfig, SshAgentConfig, UiConfig, Vault, analyze_health,
+    generate_passphrase, generate_password,
 };
 use bkp_platform::ClipboardManager;
 use bkp_protocol::PairedBrowser;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use sha2::{Digest, Sha256};
+use tauri::{Emitter, State};
 use uuid::Uuid;
 
 const MAX_FAVICON_BYTES: u64 = 262_144;
@@ -35,7 +37,7 @@ struct UnlockedVault {
 
 struct AppState {
     session: Arc<Mutex<Option<UnlockedVault>>>,
-    config: Mutex<AppConfig>,
+    config: Arc<Mutex<AppConfig>>,
     clipboard: ClipboardManager,
     paired_browsers: Mutex<Vec<PairedBrowser>>,
 }
@@ -68,6 +70,9 @@ struct AppConfigDto {
     security: SecurityConfig,
     clipboard: ClipboardConfig,
     ui: UiConfig,
+    browser_integration: BrowserIntegrationConfig,
+    secret_service: SecretServiceConfig,
+    ssh_agent: SshAgentConfig,
     managed_by_nix: bool,
 }
 
@@ -77,9 +82,23 @@ impl From<&AppConfig> for AppConfigDto {
             security: value.security.clone(),
             clipboard: value.clipboard.clone(),
             ui: value.ui.clone(),
+            browser_integration: value.browser_integration.clone(),
+            secret_service: value.secret_service.clone(),
+            ssh_agent: value.ssh_agent.clone(),
             managed_by_nix: value.managed_by_nix,
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppConfigPatch {
+    security: Option<SecurityConfig>,
+    clipboard: Option<ClipboardConfig>,
+    ui: Option<UiConfig>,
+    browser_integration: Option<BrowserIntegrationConfig>,
+    secret_service: Option<SecretServiceConfig>,
+    ssh_agent: Option<SshAgentConfig>,
 }
 
 #[derive(Serialize)]
@@ -131,6 +150,175 @@ fn with_vault_mut<T>(
     f(unlocked)
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSessionPayload {
+    path: String,
+    password: String,
+    keyfile: Option<String>,
+    keep_open: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EncryptedSessionEnvelope {
+    v: u8,
+    nonce: String,
+    data: String,
+    tag: String,
+}
+
+fn session_data_dir() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return Some(PathBuf::from(xdg).join("betterkeepass"));
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".local/share/betterkeepass"))
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(bytes).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn load_or_create_session_key(dir: &Path) -> Result<[u8; 32], String> {
+    let key_path = dir.join("session.key");
+    if key_path.exists() {
+        let raw = fs::read(&key_path).map_err(|e| e.to_string())?;
+        if raw.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&raw);
+            return Ok(key);
+        }
+    }
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).map_err(|e| e.to_string())?;
+    write_private_file(&key_path, &key)?;
+    Ok(key)
+}
+
+fn xor_keystream(key: &[u8; 32], nonce: &[u8; 16], input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    for (block_idx, chunk) in input.chunks(32).enumerate() {
+        let mut hasher = Sha256::new();
+        hasher.update(key);
+        hasher.update(nonce);
+        hasher.update((block_idx as u32).to_le_bytes());
+        let block = hasher.finalize();
+        for (b, k) in chunk.iter().zip(block.iter()) {
+            out.push(b ^ k);
+        }
+    }
+    out
+}
+
+fn compute_session_tag(key: &[u8; 32], nonce: &[u8; 16], ciphertext: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(nonce);
+    hasher.update(ciphertext);
+    hasher.finalize().into()
+}
+
+fn save_persisted_session(unlocked: &UnlockedVault) -> Result<(), String> {
+    let Some(dir) = session_data_dir() else {
+        return Ok(());
+    };
+    let key = load_or_create_session_key(&dir)?;
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+
+    let payload = PersistedSessionPayload {
+        path: unlocked.path.to_string_lossy().into_owned(),
+        password: unlocked
+            .master_password
+            .as_ref()
+            .map(|s| s.expose_secret().to_owned())
+            .unwrap_or_default(),
+        keyfile: unlocked
+            .keyfile
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
+        keep_open: unlocked.keep_open,
+    };
+    let plaintext = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+    let ciphertext = xor_keystream(&key, &nonce, &plaintext);
+    let tag = compute_session_tag(&key, &nonce, &ciphertext);
+
+    let envelope = EncryptedSessionEnvelope {
+        v: 1,
+        nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
+        data: base64::engine::general_purpose::STANDARD.encode(&ciphertext),
+        tag: base64::engine::general_purpose::STANDARD.encode(tag),
+    };
+    let serialized = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
+    write_private_file(&dir.join("session.dat"), &serialized)
+}
+
+fn load_persisted_session() -> Option<PersistedSessionPayload> {
+    let dir = session_data_dir()?;
+    let dat_path = dir.join("session.dat");
+    let key_path = dir.join("session.key");
+    if !dat_path.exists() || !key_path.exists() {
+        return None;
+    }
+    let key_bytes = fs::read(&key_path).ok()?;
+    let key: [u8; 32] = key_bytes.try_into().ok()?;
+    let envelope: EncryptedSessionEnvelope =
+        serde_json::from_slice(&fs::read(&dat_path).ok()?).ok()?;
+    if envelope.v != 1 {
+        return None;
+    }
+    let nonce_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&envelope.nonce)
+        .ok()?;
+    let nonce: [u8; 16] = nonce_bytes.try_into().ok()?;
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(&envelope.data)
+        .ok()?;
+    let tag_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&envelope.tag)
+        .ok()?;
+    let expected_tag = compute_session_tag(&key, &nonce, &ciphertext);
+    if tag_bytes.as_slice() != expected_tag {
+        return None;
+    }
+    let plaintext = xor_keystream(&key, &nonce, &ciphertext);
+    serde_json::from_slice(&plaintext).ok()
+}
+
+fn clear_persisted_session() {
+    if let Some(dir) = session_data_dir() {
+        let _ = fs::remove_file(dir.join("session.dat"));
+        let _ = fs::remove_file(dir.join("session.key"));
+    }
+}
+
 #[tauri::command]
 async fn open_vault(
     state: State<'_, AppState>,
@@ -138,6 +326,7 @@ async fn open_vault(
     password: String,
     keyfile: Option<String>,
     keep_open: Option<bool>,
+    remember_session: Option<bool>,
 ) -> Result<(), String> {
     let pb = PathBuf::from(path);
     let kf = keyfile.map(PathBuf::from);
@@ -153,18 +342,41 @@ async fn open_vault(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?
     };
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
-    *guard = Some(UnlockedVault {
+
+    let should_remember = {
+        let mut cfg = state
+            .config
+            .lock()
+            .map_err(|_| "falha ao acessar configuração".to_owned())?;
+        if let Some(remember) = remember_session {
+            cfg.security.remember_session = remember;
+            if !cfg.managed_by_nix {
+                let _ = cfg.save();
+            }
+        }
+        cfg.security.remember_session
+    };
+
+    let unlocked = UnlockedVault {
         vault,
         path: pb,
         master_password: secret,
         keyfile: kf,
         last_activity: Instant::now(),
         keep_open: keep_open.unwrap_or(false),
-    });
+    };
+
+    if should_remember {
+        let _ = save_persisted_session(&unlocked);
+    } else {
+        clear_persisted_session();
+    }
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
+    *guard = Some(unlocked);
     Ok(())
 }
 
@@ -175,6 +387,7 @@ async fn create_vault(
     password: String,
     name: Option<String>,
     keep_open: Option<bool>,
+    remember_session: Option<bool>,
 ) -> Result<(), String> {
     let pb = PathBuf::from(path);
     let secret = Some(SecretString::from(password));
@@ -191,19 +404,100 @@ async fn create_vault(
         .await
         .map_err(|e| e.to_string())??
     };
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
-    *guard = Some(UnlockedVault {
+
+    let should_remember = {
+        let mut cfg = state
+            .config
+            .lock()
+            .map_err(|_| "falha ao acessar configuração".to_owned())?;
+        if let Some(remember) = remember_session {
+            cfg.security.remember_session = remember;
+            if !cfg.managed_by_nix {
+                let _ = cfg.save();
+            }
+        }
+        cfg.security.remember_session
+    };
+
+    let unlocked = UnlockedVault {
         vault,
         path: pb,
         master_password: secret,
         keyfile: None,
         last_activity: Instant::now(),
         keep_open: keep_open.unwrap_or(false),
-    });
+    };
+
+    if should_remember {
+        let _ = save_persisted_session(&unlocked);
+    } else {
+        clear_persisted_session();
+    }
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "falha ao armazenar cofre".to_owned())?;
+    *guard = Some(unlocked);
     Ok(())
+}
+
+#[tauri::command]
+async fn restore_session(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    if let Ok(guard) = state.session.lock()
+        && let Some(unlocked) = guard.as_ref()
+    {
+        return Ok(Some(unlocked.path.to_string_lossy().into_owned()));
+    }
+
+    let should_remember = state
+        .config
+        .lock()
+        .map(|c| c.security.remember_session)
+        .unwrap_or(false);
+    if !should_remember {
+        return Ok(None);
+    }
+
+    let Some(saved) = load_persisted_session() else {
+        return Ok(None);
+    };
+
+    let pb = PathBuf::from(&saved.path);
+    let kf = saved.keyfile.as_deref().map(PathBuf::from);
+    let secret = (!saved.password.is_empty()).then(|| SecretString::from(saved.password));
+    let opened = {
+        let pb_clone = pb.clone();
+        let kf_clone = kf.clone();
+        let secret_clone = secret.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            Vault::open(&pb_clone, secret_clone, kf_clone.as_deref())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    match opened {
+        Ok(vault) => {
+            let mut guard = state
+                .session
+                .lock()
+                .map_err(|_| "falha ao armazenar cofre".to_owned())?;
+            *guard = Some(UnlockedVault {
+                vault,
+                path: pb,
+                master_password: secret,
+                keyfile: kf,
+                last_activity: Instant::now(),
+                keep_open: saved.keep_open,
+            });
+            Ok(Some(saved.path))
+        }
+        Err(_) => {
+            clear_persisted_session();
+            Ok(None)
+        }
+    }
 }
 
 #[tauri::command(async)]
@@ -213,6 +507,7 @@ fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|_| "falha ao bloquear cofre".to_owned())?;
     *guard = None;
+    clear_persisted_session();
     Ok(())
 }
 
@@ -548,6 +843,58 @@ fn set_ui_config(state: State<'_, AppState>, ui: UiConfig) -> Result<SetUiConfig
     Ok(SetUiConfigResult { persisted: true })
 }
 
+#[tauri::command]
+fn set_app_config(
+    state: State<'_, AppState>,
+    patch: AppConfigPatch,
+) -> Result<SetUiConfigResult, String> {
+    let remember_changed = {
+        let mut guard = state
+            .config
+            .lock()
+            .map_err(|_| "falha ao acessar configuração".to_owned())?;
+        if guard.managed_by_nix {
+            return Ok(SetUiConfigResult { persisted: false });
+        }
+        let prev_remember = guard.security.remember_session;
+        if let Some(security) = patch.security {
+            guard.security = security;
+        }
+        if let Some(clipboard) = patch.clipboard {
+            guard.clipboard = clipboard;
+        }
+        if let Some(ui) = patch.ui {
+            guard.ui = ui;
+        }
+        if let Some(browser_integration) = patch.browser_integration {
+            guard.browser_integration = browser_integration;
+        }
+        if let Some(secret_service) = patch.secret_service {
+            guard.secret_service = secret_service;
+        }
+        if let Some(ssh_agent) = patch.ssh_agent {
+            guard.ssh_agent = ssh_agent;
+        }
+        guard.save().map_err(|e| e.to_string())?;
+        let next_remember = guard.security.remember_session;
+        (prev_remember != next_remember).then_some(next_remember)
+    };
+
+    if let Some(remember) = remember_changed {
+        if remember {
+            if let Ok(guard) = state.session.lock()
+                && let Some(unlocked) = guard.as_ref()
+            {
+                let _ = save_persisted_session(unlocked);
+            }
+        } else {
+            clear_persisted_session();
+        }
+    }
+
+    Ok(SetUiConfigResult { persisted: true })
+}
+
 fn validate_public_domain(raw: &str) -> Option<String> {
     let domain = raw.trim().trim_end_matches('.').to_ascii_lowercase();
     if domain.is_empty() || domain.len() > 253 || !domain.contains('.') {
@@ -747,29 +1094,16 @@ fn revoke_paired_browser(state: State<'_, AppState>, id: String) -> Result<(), S
 
 /// Ponto de entrada da aplicação Tauri.
 pub fn run() {
-    let config = AppConfig::load().unwrap_or_default();
-    let lock_secs = config.security.lock_after_seconds;
+    let loaded_config = AppConfig::load().unwrap_or_default();
+    let config = Arc::new(Mutex::new(loaded_config));
     let session = Arc::new(Mutex::new(None::<UnlockedVault>));
 
-    if lock_secs > 0 {
-        let watcher_session = Arc::clone(&session);
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_secs(5));
-                if let Ok(mut guard) = watcher_session.lock()
-                    && let Some(unlocked) = guard.as_ref()
-                    && !unlocked.keep_open
-                    && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
-                {
-                    *guard = None;
-                }
-            }
-        });
-    }
+    let watcher_session = Arc::clone(&session);
+    let watcher_config = Arc::clone(&config);
 
     let state = AppState {
         session,
-        config: Mutex::new(config),
+        config,
         clipboard: ClipboardManager::new(),
         paired_browsers: Mutex::new(Vec::new()),
     };
@@ -777,9 +1111,40 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .setup(move |app| {
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                    let lock_secs = watcher_config
+                        .lock()
+                        .map(|c| c.security.lock_after_seconds)
+                        .unwrap_or(300);
+                    if lock_secs == 0 {
+                        continue;
+                    }
+                    let locked_now = if let Ok(mut guard) = watcher_session.lock()
+                        && let Some(unlocked) = guard.as_ref()
+                        && !unlocked.keep_open
+                        && unlocked.last_activity.elapsed() >= Duration::from_secs(lock_secs)
+                    {
+                        *guard = None;
+                        clear_persisted_session();
+                        true
+                    } else {
+                        false
+                    };
+                    if locked_now {
+                        let _ = app_handle.emit("vault-locked", ());
+                    }
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_vault,
             create_vault,
+            restore_session,
             lock_vault,
             search_entries,
             get_group_tree,
@@ -802,6 +1167,7 @@ pub fn run() {
             analyze_health_cmd,
             get_app_config,
             set_ui_config,
+            set_app_config,
             get_favicon,
             list_paired_browsers,
             revoke_paired_browser,

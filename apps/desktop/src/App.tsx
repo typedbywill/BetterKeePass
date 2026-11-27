@@ -54,12 +54,29 @@ export function App() {
 
   const t = getTranslations(language);
   const detailRef = useRef<HTMLElement | null>(null);
+  const restoreAttemptedRef = useRef(false);
   const [editRequestNonce, setEditRequestNonce] = useState(0);
 
   // Apply theme mode & preset for both UnlockScreen and unlocked shell, reacting to OS theme changes.
   useEffect(() => {
     return subscribeSystemTheme(theme, themePreset);
   }, [theme, themePreset]);
+
+  // Listen for backend auto-lock events.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    void api.onVaultLocked(() => {
+      if (active) setUnlocked(false);
+    }).then((fn) => {
+      if (active) unlisten = fn;
+      else fn();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [setUnlocked]);
 
   const configQuery = useQuery({
     queryKey: ['app-config'],
@@ -75,6 +92,18 @@ export function App() {
       );
     }
   }, [configQuery.data, configHydrated, hydrateFromConfig]);
+
+  // Attempt to restore a persisted session once on app startup.
+  useEffect(() => {
+    if (restoreAttemptedRef.current || unlocked || !configQuery.data) return;
+    restoreAttemptedRef.current = true;
+    if (!configQuery.data.security.rememberSession) return;
+    void api.restoreSession().then((restoredPath) => {
+      if (restoredPath) {
+        setUnlocked(true, restoredPath);
+      }
+    });
+  }, [configQuery.data, unlocked, setUnlocked]);
 
   const faviconsWereEnabled = useRef(faviconsEnabled);
 

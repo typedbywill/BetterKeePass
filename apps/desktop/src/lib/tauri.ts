@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 
 export interface EntrySummary {
@@ -82,11 +83,48 @@ export interface UiConfig {
   expandedGroups?: string[];
 }
 
+export interface SecurityConfig {
+  lockAfterSeconds: number;
+  lockOnSessionLock: boolean;
+  rememberSession: boolean;
+}
+
+export interface ClipboardConfig {
+  clearAfterSeconds: number;
+}
+
+export interface BrowserIntegrationConfig {
+  firefox: boolean;
+  chromium: boolean;
+  brave: boolean;
+}
+
+export interface SecretServiceConfig {
+  enable: boolean;
+  exposedGroups: string[];
+}
+
+export interface SshAgentConfig {
+  enable: boolean;
+}
+
 export interface AppConfig {
-  security: { lockAfterSeconds: number; lockOnSessionLock: boolean };
-  clipboard: { clearAfterSeconds: number };
+  security: SecurityConfig;
+  clipboard: ClipboardConfig;
   ui: UiConfig;
+  browserIntegration: BrowserIntegrationConfig;
+  secretService: SecretServiceConfig;
+  sshAgent: SshAgentConfig;
   managedByNix: boolean;
+}
+
+export interface AppConfigPatch {
+  security?: SecurityConfig;
+  clipboard?: ClipboardConfig;
+  ui?: UiConfig;
+  browserIntegration?: BrowserIntegrationConfig;
+  secretService?: SecretServiceConfig;
+  sshAgent?: SshAgentConfig;
 }
 
 export interface SetUiConfigResult {
@@ -181,7 +219,7 @@ const mockHistory = new Map<
 >();
 
 let mockConfig: AppConfig = {
-  security: { lockAfterSeconds: 300, lockOnSessionLock: true },
+  security: { lockAfterSeconds: 300, lockOnSessionLock: true, rememberSession: false },
   clipboard: { clearAfterSeconds: 15 },
   ui: {
     theme: 'system',
@@ -194,6 +232,9 @@ let mockConfig: AppConfig = {
     sortBy: 'title',
     expandedGroups: [],
   },
+  browserIntegration: { firefox: false, chromium: false, brave: false },
+  secretService: { enable: false, exposedGroups: [] },
+  sshAgent: { enable: false },
   managedByNix: false,
 };
 
@@ -216,20 +257,91 @@ export const api = {
     if (!hasTauri()) return null;
     return open({ multiple: false });
   },
-  async openVault(path: string, password: string, keyfile?: string, keepOpen = false): Promise<void> {
+  async openVault(
+    path: string,
+    password: string,
+    keyfile?: string,
+    keepOpen = false,
+    rememberSession?: boolean,
+  ): Promise<void> {
     if (hasTauri()) {
-      await invoke('open_vault', { path, password, keyfile: keyfile || null, keepOpen });
+      await invoke('open_vault', {
+        path,
+        password,
+        keyfile: keyfile || null,
+        keepOpen,
+        rememberSession: rememberSession ?? null,
+      });
+      return;
+    }
+    if (rememberSession !== undefined) {
+      mockConfig = {
+        ...mockConfig,
+        security: { ...mockConfig.security, rememberSession },
+      };
+    }
+    if (typeof localStorage !== 'undefined') {
+      if (mockConfig.security.rememberSession) {
+        localStorage.setItem('bkp.mockSession', path);
+      } else {
+        localStorage.removeItem('bkp.mockSession');
+      }
     }
   },
-  async createVault(path: string, password: string, name?: string, keepOpen = false): Promise<void> {
+  async createVault(
+    path: string,
+    password: string,
+    name?: string,
+    keepOpen = false,
+    rememberSession?: boolean,
+  ): Promise<void> {
     if (hasTauri()) {
-      await invoke('create_vault', { path, password, name: name || null, keepOpen });
+      await invoke('create_vault', {
+        path,
+        password,
+        name: name || null,
+        keepOpen,
+        rememberSession: rememberSession ?? null,
+      });
+      return;
     }
+    if (rememberSession !== undefined) {
+      mockConfig = {
+        ...mockConfig,
+        security: { ...mockConfig.security, rememberSession },
+      };
+    }
+    if (typeof localStorage !== 'undefined') {
+      if (mockConfig.security.rememberSession) {
+        localStorage.setItem('bkp.mockSession', path);
+      } else {
+        localStorage.removeItem('bkp.mockSession');
+      }
+    }
+  },
+  async restoreSession(): Promise<string | null> {
+    if (hasTauri()) {
+      return invoke('restore_session');
+    }
+    if (mockConfig.security.rememberSession && typeof localStorage !== 'undefined') {
+      return localStorage.getItem('bkp.mockSession');
+    }
+    return null;
   },
   async lockVault(): Promise<void> {
     if (hasTauri()) {
       await invoke('lock_vault');
+      return;
     }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('bkp.mockSession');
+    }
+  },
+  async onVaultLocked(callback: () => void): Promise<() => void> {
+    if (hasTauri()) {
+      return listen('vault-locked', () => callback());
+    }
+    return () => {};
   },
   async listEntries(query: string): Promise<EntrySummary[]> {
     if (hasTauri()) {
@@ -589,6 +701,26 @@ export const api = {
     }
     mockConfig = { ...mockConfig, ui: { ...ui } };
     return { persisted: !mockConfig.managedByNix };
+  },
+  async setAppConfig(patch: AppConfigPatch): Promise<SetUiConfigResult> {
+    if (hasTauri()) {
+      return invoke('set_app_config', { patch });
+    }
+    if (mockConfig.managedByNix) {
+      return { persisted: false };
+    }
+    mockConfig = {
+      ...mockConfig,
+      ...(patch.security ? { security: { ...patch.security } } : {}),
+      ...(patch.clipboard ? { clipboard: { ...patch.clipboard } } : {}),
+      ...(patch.ui ? { ui: { ...patch.ui } } : {}),
+      ...(patch.browserIntegration
+        ? { browserIntegration: { ...patch.browserIntegration } }
+        : {}),
+      ...(patch.secretService ? { secretService: { ...patch.secretService } } : {}),
+      ...(patch.sshAgent ? { sshAgent: { ...patch.sshAgent } } : {}),
+    };
+    return { persisted: true };
   },
   async getFavicon(domain: string): Promise<string | null> {
     if (hasTauri()) {

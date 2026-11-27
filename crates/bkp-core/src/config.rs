@@ -13,10 +13,12 @@ use crate::error::Result;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SecurityConfig {
-    /// Tempo de inatividade em segundos para bloquear o cofre automaticamente.
+    /// Tempo de inatividade em segundos para bloquear o cofre automaticamente (0 = desativado).
     pub lock_after_seconds: u64,
     /// Bloquear ao suspender ou bloquear a sessão do sistema operacional.
     pub lock_on_session_lock: bool,
+    /// Manter a sessão salva localmente para reabrir o aplicativo já desbloqueado.
+    pub remember_session: bool,
 }
 
 impl Default for SecurityConfig {
@@ -24,6 +26,7 @@ impl Default for SecurityConfig {
         Self {
             lock_after_seconds: 300,
             lock_on_session_lock: true,
+            remember_session: false,
         }
     }
 }

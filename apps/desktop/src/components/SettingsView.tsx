@@ -1,12 +1,16 @@
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Info, Monitor, Moon, Sun } from 'lucide-react';
 import type { Language } from '../i18n';
 import type { Translations } from '../i18n/pt-BR';
 import { cn } from '../lib/cn';
-import { api } from '../lib/tauri';
+import { api, type AppConfigPatch } from '../lib/tauri';
 import { resolveDark, THEME_PRESETS } from '../lib/theme';
-import { useUiStore, type ThemeMode } from '../store/ui';
-import { Button, SegmentedControl, Switch } from '../ui';
+import { useUiStore, type SortBy, type ThemeMode } from '../store/ui';
+import { Button, Input, SegmentedControl, Switch } from '../ui';
+
+const LOCK_PRESETS = [0, 30, 60, 300, 900];
+const CLIPBOARD_PRESETS = [0, 10, 15, 30, 60];
 
 export function SettingsView({ t }: { t: Translations }) {
   const queryClient = useQueryClient();
@@ -17,10 +21,14 @@ export function SettingsView({ t }: { t: Translations }) {
     setThemePreset,
     language,
     setLanguage,
+    sortBy,
+    setSortBy,
     presentationMode,
     togglePresentationMode,
     faviconsEnabled,
     setFaviconsEnabled,
+    setClipboardClearSeconds,
+    pushToast,
   } = useUiStore();
 
   const configQuery = useQuery({
@@ -35,6 +43,48 @@ export function SettingsView({ t }: { t: Translations }) {
 
   const managed = configQuery.data?.managedByNix ?? false;
   const previewDark = resolveDark(theme);
+
+  const [lockSecondsDraft, setLockSecondsDraft] = useState('300');
+  const [clipboardSecondsDraft, setClipboardSecondsDraft] = useState('15');
+
+  useEffect(() => {
+    if (configQuery.data) {
+      setLockSecondsDraft(String(configQuery.data.security.lockAfterSeconds));
+      setClipboardSecondsDraft(String(configQuery.data.clipboard.clearAfterSeconds));
+    }
+  }, [configQuery.data]);
+
+  async function savePatch(patch: AppConfigPatch) {
+    if (managed) return;
+    await api.setAppConfig(patch);
+    if (patch.clipboard) {
+      setClipboardClearSeconds(patch.clipboard.clearAfterSeconds);
+    }
+    await queryClient.invalidateQueries({ queryKey: ['app-config'] });
+    pushToast({ kind: 'success', title: t.settingsSavedToast, durationMs: 1800 });
+  }
+
+  function commitLockSeconds(raw: string) {
+    if (!configQuery.data || managed) return;
+    const parsed = Math.max(0, Math.floor(Number(raw) || 0));
+    setLockSecondsDraft(String(parsed));
+    if (parsed !== configQuery.data.security.lockAfterSeconds) {
+      void savePatch({
+        security: { ...configQuery.data.security, lockAfterSeconds: parsed },
+      });
+    }
+  }
+
+  function commitClipboardSeconds(raw: string) {
+    if (!configQuery.data || managed) return;
+    const parsed = Math.max(0, Math.floor(Number(raw) || 0));
+    setClipboardSecondsDraft(String(parsed));
+    if (parsed !== configQuery.data.clipboard.clearAfterSeconds) {
+      void savePatch({
+        clipboard: { clearAfterSeconds: parsed },
+      });
+    }
+  }
 
   async function handleRevoke(id: string) {
     await api.revokeBrowser(id);
@@ -165,6 +215,20 @@ export function SettingsView({ t }: { t: Translations }) {
             </div>
 
             <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <span className="text-[13px] text-fg">{t.defaultSortLabel}</span>
+              <SegmentedControl<SortBy>
+                ariaLabel={t.defaultSortLabel}
+                value={sortBy}
+                onChange={setSortBy}
+                isDisabled={managed}
+                options={[
+                  { value: 'title', label: t.sortTitle },
+                  { value: 'recent', label: t.sortRecent },
+                ]}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
               <div className="min-w-0">
                 <p className="text-[13px] text-fg">{t.faviconsLabel}</p>
                 <p className="text-xs text-fg-muted mt-0.5">{t.faviconsDesc}</p>
@@ -185,6 +249,138 @@ export function SettingsView({ t }: { t: Translations }) {
             <h3 className="text-xs font-semibold text-fg">{t.securitySection}</h3>
           </div>
           <div className="divide-y divide-border">
+            {configQuery.data && (
+              <>
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-fg">{t.rememberSession}</p>
+                    <p className="text-xs text-fg-muted mt-0.5">{t.rememberSessionDesc}</p>
+                  </div>
+                  <Switch
+                    isSelected={configQuery.data.security.rememberSession}
+                    onChange={(rememberSession) =>
+                      void savePatch({
+                        security: { ...configQuery.data!.security, rememberSession },
+                      })
+                    }
+                    isDisabled={managed}
+                    aria-label={t.rememberSession}
+                  />
+                </div>
+
+                <div className="px-4 py-3 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[13px] text-fg">{t.lockAfterLabel}</p>
+                      <p className="text-xs text-fg-muted mt-0.5">{t.lockAfterDesc}</p>
+                    </div>
+                    <div className="w-24 shrink-0">
+                      <Input
+                        type="number"
+                        min={0}
+                        aria-label={t.lockAfterLabel}
+                        value={lockSecondsDraft}
+                        disabled={managed}
+                        onChange={(e) => setLockSecondsDraft(e.target.value)}
+                        onBlur={() => commitLockSeconds(lockSecondsDraft)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="font-mono text-right tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {LOCK_PRESETS.map((secs) => {
+                      const active = configQuery.data!.security.lockAfterSeconds === secs;
+                      return (
+                        <button
+                          key={secs}
+                          type="button"
+                          disabled={managed}
+                          onClick={() => commitLockSeconds(String(secs))}
+                          className={cn(
+                            'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed',
+                            active
+                              ? 'border-accent bg-accent-subtle text-accent'
+                              : 'border-border bg-bg-subtle text-fg-muted hover:text-fg hover:bg-surface-hover',
+                          )}
+                        >
+                          {secs === 0 ? t.disabledOption : `${secs}s`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-fg">{t.lockOnSessionLockLabel}</p>
+                    <p className="text-xs text-fg-muted mt-0.5">{t.lockOnSessionLockDesc}</p>
+                  </div>
+                  <Switch
+                    isSelected={configQuery.data.security.lockOnSessionLock}
+                    onChange={(lockOnSessionLock) =>
+                      void savePatch({
+                        security: { ...configQuery.data!.security, lockOnSessionLock },
+                      })
+                    }
+                    isDisabled={managed}
+                    aria-label={t.lockOnSessionLockLabel}
+                  />
+                </div>
+
+                <div className="px-4 py-3 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[13px] text-fg">{t.clipboardClearLabel}</p>
+                      <p className="text-xs text-fg-muted mt-0.5">{t.clipboardClearDesc}</p>
+                    </div>
+                    <div className="w-24 shrink-0">
+                      <Input
+                        type="number"
+                        min={0}
+                        aria-label={t.clipboardClearLabel}
+                        value={clipboardSecondsDraft}
+                        disabled={managed}
+                        onChange={(e) => setClipboardSecondsDraft(e.target.value)}
+                        onBlur={() => commitClipboardSeconds(clipboardSecondsDraft)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="font-mono text-right tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CLIPBOARD_PRESETS.map((secs) => {
+                      const active = configQuery.data!.clipboard.clearAfterSeconds === secs;
+                      return (
+                        <button
+                          key={secs}
+                          type="button"
+                          disabled={managed}
+                          onClick={() => commitClipboardSeconds(String(secs))}
+                          className={cn(
+                            'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed',
+                            active
+                              ? 'border-accent bg-accent-subtle text-accent'
+                              : 'border-border bg-bg-subtle text-fg-muted hover:text-fg hover:bg-surface-hover',
+                          )}
+                        >
+                          {secs === 0 ? t.disabledOption : `${secs}s`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="flex items-center justify-between gap-4 px-4 py-3">
               <span className="text-[13px] text-fg">{t.presentationMode}</span>
               <Switch
@@ -193,25 +389,90 @@ export function SettingsView({ t }: { t: Translations }) {
                 aria-label={t.presentationMode}
               />
             </div>
-
-            {configQuery.data && (
-              <div className="px-4 py-3 flex flex-col gap-1.5 text-xs text-fg-muted">
-                <div className="flex justify-between">
-                  <span>{t.lockAfterLabel}</span>
-                  <span className="font-mono text-fg tabular-nums">
-                    {configQuery.data.security.lockAfterSeconds}s
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{t.clipboardClearLabel}</span>
-                  <span className="font-mono text-fg tabular-nums">
-                    {configQuery.data.clipboard.clearAfterSeconds}s
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
+
+        {/* Integrations */}
+        {configQuery.data && (
+          <div className="rounded-xl border border-border bg-surface overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border bg-bg-subtle">
+              <h3 className="text-xs font-semibold text-fg">{t.integrationsSection}</h3>
+            </div>
+            <div className="divide-y divide-border">
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-[13px] text-fg">{t.browserFirefox}</span>
+                <Switch
+                  isSelected={configQuery.data.browserIntegration.firefox}
+                  onChange={(firefox) =>
+                    void savePatch({
+                      browserIntegration: { ...configQuery.data!.browserIntegration, firefox },
+                    })
+                  }
+                  isDisabled={managed}
+                  aria-label={t.browserFirefox}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-[13px] text-fg">{t.browserChromium}</span>
+                <Switch
+                  isSelected={configQuery.data.browserIntegration.chromium}
+                  onChange={(chromium) =>
+                    void savePatch({
+                      browserIntegration: { ...configQuery.data!.browserIntegration, chromium },
+                    })
+                  }
+                  isDisabled={managed}
+                  aria-label={t.browserChromium}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <span className="text-[13px] text-fg">{t.browserBrave}</span>
+                <Switch
+                  isSelected={configQuery.data.browserIntegration.brave}
+                  onChange={(brave) =>
+                    void savePatch({
+                      browserIntegration: { ...configQuery.data!.browserIntegration, brave },
+                    })
+                  }
+                  isDisabled={managed}
+                  aria-label={t.browserBrave}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-[13px] text-fg">{t.secretServiceLabel}</p>
+                  <p className="text-xs text-fg-muted mt-0.5">{t.secretServiceDesc}</p>
+                </div>
+                <Switch
+                  isSelected={configQuery.data.secretService.enable}
+                  onChange={(enable) =>
+                    void savePatch({
+                      secretService: { ...configQuery.data!.secretService, enable },
+                    })
+                  }
+                  isDisabled={managed}
+                  aria-label={t.secretServiceLabel}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-[13px] text-fg">{t.sshAgentLabel}</p>
+                  <p className="text-xs text-fg-muted mt-0.5">{t.sshAgentDesc}</p>
+                </div>
+                <Switch
+                  isSelected={configQuery.data.sshAgent.enable}
+                  onChange={(enable) =>
+                    void savePatch({
+                      sshAgent: { enable },
+                    })
+                  }
+                  isDisabled={managed}
+                  aria-label={t.sshAgentLabel}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Paired Browsers */}
         <div className="rounded-xl border border-border bg-surface overflow-hidden">

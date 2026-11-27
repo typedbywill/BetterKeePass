@@ -33,6 +33,13 @@ describe('BetterKeePass Desktop UI', () => {
     localStorage.clear();
     document.documentElement.classList.remove('dark');
     document.documentElement.removeAttribute('data-theme');
+    await api.setAppConfig({
+      security: { lockAfterSeconds: 300, lockOnSessionLock: true, rememberSession: false },
+      clipboard: { clearAfterSeconds: 15 },
+      browserIntegration: { firefox: false, chromium: false, brave: false },
+      secretService: { enable: false, exposedGroups: [] },
+      sshAgent: { enable: false },
+    });
     await api.setUiConfig({
       theme: 'system',
       themePreset: 'default',
@@ -370,5 +377,56 @@ describe('BetterKeePass Desktop UI', () => {
 
     copySpy.mockRestore();
     openSpy.mockRestore();
+  });
+
+  it('remembers session across app restarts when enabled on unlock', async () => {
+    const first = renderApp();
+    const rememberCheckbox = screen.getByRole('checkbox', {
+      name: /Manter conectado ao fechar o app/i,
+    });
+    fireEvent.click(rememberCheckbox);
+    await unlockDemoVault();
+    first.unmount();
+
+    // Simulate reopening the app with unlocked = false
+    useUiStore.setState({ unlocked: false, configHydrated: false });
+    renderApp();
+
+    await waitFor(() => {
+      expect(screen.getByText('GitHub')).toBeInTheDocument();
+    });
+  });
+
+  it('configures auto-lock timeout, clipboard timeout, and integrations in Settings', async () => {
+    const spy = vi.spyOn(api, 'setAppConfig');
+    renderApp();
+    await unlockDemoVault();
+
+    fireEvent.click(screen.getByRole('button', { name: /Configurações/i }));
+
+    const lockInput = await screen.findByLabelText(/Bloqueio automático \(segundos\)/i);
+    fireEvent.change(lockInput, { target: { value: '45' } });
+    fireEvent.blur(lockInput);
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          security: expect.objectContaining({ lockAfterSeconds: 45 }),
+        }),
+      );
+    });
+
+    const sshSwitch = screen.getByRole('switch', { name: /Agente SSH integrado/i });
+    fireEvent.click(sshSwitch);
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sshAgent: { enable: true },
+        }),
+      );
+    });
+
+    spy.mockRestore();
   });
 });

@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowRight, Clock3, FileKey2, FolderOpen, KeyRound, LockKeyhole, Plus, ShieldCheck } from 'lucide-react';
 import { BrandIcon } from './BrandIcon';
@@ -8,14 +9,26 @@ import { useUiStore } from '../store/ui';
 import { Button, Checkbox, Input, PasswordInput } from '../ui';
 
 export function UnlockScreen({ t }: { t: Translations }) {
+  const queryClient = useQueryClient();
   const { setUnlocked, recentVaults, addRecentVault } = useUiStore();
+  const configQuery = useQuery({
+    queryKey: ['app-config'],
+    queryFn: () => api.getConfig(),
+  });
   const [mode, setMode] = useState<'open' | 'create'>('open');
   const [vaultPath, setVaultPath] = useState(recentVaults[0] || './cofre.kdbx');
   const [password, setPassword] = useState('');
   const [keyfile, setKeyfile] = useState('');
   const [keepOpen, setKeepOpen] = useState(false);
+  const [rememberSession, setRememberSession] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (configQuery.data) {
+      setRememberSession(configQuery.data.security.rememberSession);
+    }
+  }, [configQuery.data]);
 
   async function browseVault() {
     try {
@@ -36,10 +49,14 @@ export function UnlockScreen({ t }: { t: Translations }) {
     setError(null);
     setBusy(true);
     try {
-      if (mode === 'open') await api.openVault(vaultPath, password, keyfile || undefined, keepOpen);
-      else await api.createVault(vaultPath, password, 'BetterKeePass', keepOpen);
+      if (mode === 'open') {
+        await api.openVault(vaultPath, password, keyfile || undefined, keepOpen, rememberSession);
+      } else {
+        await api.createVault(vaultPath, password, 'BetterKeePass', keepOpen, rememberSession);
+      }
       setPassword('');
       addRecentVault(vaultPath);
+      await queryClient.invalidateQueries({ queryKey: ['app-config'] });
       setUnlocked(true, vaultPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -105,6 +122,7 @@ export function UnlockScreen({ t }: { t: Translations }) {
                 <span className="flex gap-2"><Input value={keyfile} onChange={e => setKeyfile(e.target.value)} aria-label={t.keyfilePath} leftSlot={<FileKey2 className="h-3.5 w-3.5" aria-hidden="true" />} className="font-mono min-w-0" /><Button type="button" variant="secondary" size="md" onPress={() => void browseKeyfile()} aria-label={t.browseKeyfile}><FolderOpen className="h-4 w-4" /></Button></span>
               </label>}
               <div><Checkbox isSelected={keepOpen} onChange={setKeepOpen}>{t.keepOpen}</Checkbox><p className="mt-1 ml-6 text-xs text-fg-subtle leading-relaxed">{t.keepOpenDesc}</p></div>
+              <div><Checkbox isSelected={rememberSession} onChange={setRememberSession}>{t.rememberSession}</Checkbox><p className="mt-1 ml-6 text-xs text-fg-subtle leading-relaxed">{t.rememberSessionDesc}</p></div>
               {error && <p role="alert" className="text-xs text-danger bg-danger-subtle border border-danger/25 px-3 py-2 rounded-md">{error}</p>}
               <Button type="submit" variant="primary" size="md" isLoading={busy} className="w-full mt-1">{mode === 'open' ? <KeyRound className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}{mode === 'open' ? t.unlockBtn : t.createBtn}</Button>
             </form>
