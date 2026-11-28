@@ -55,7 +55,7 @@ fun CopyField(
             showCheck = false
         }
     }
-    val copy = {
+    val copy: () -> Unit = {
         view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
         onCopy?.invoke()
         copies++
