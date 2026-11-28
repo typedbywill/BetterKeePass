@@ -1,0 +1,37 @@
+[package]
+name = "bkp-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Fachada UniFFI sobre bkp-core e bkp-passkey para aplicativos móveis nativos"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi_bindgen.rs"
+
+[dependencies]
+bkp-core.workspace = true
+bkp-passkey.workspace = true
+keepass.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+uniffi = { version = "0.33", features = ["cli"] }
+uuid.workspace = true
+zeroize.workspace = true
+
+[lints.rust]
+# O scaffolding gerado pelas proc-macros do UniFFI emite #[unsafe(no_mangle)] e símbolos FFI extern "C".
+unsafe_code = "allow"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+doc_markdown = "allow"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Assinaturas exportadas pelo UniFFI recebem tipos owned (String, Vec<u8>, Option<T>).
+needless_pass_by_value = "allow"

@@ -216,6 +216,20 @@ impl Vault {
         Ok(Self { db })
     }
 
+    /// Serializa e criptografa o cofre em memória como KDBX 4, retornando os bytes resultantes.
+    pub fn save_to_bytes(
+        &self,
+        password: Option<SecretString>,
+        keyfile_bytes: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
+        let key = build_database_key(password.as_ref(), keyfile_bytes)?;
+        drop(password);
+
+        let mut buf = Vec::new();
+        self.db.save(&mut buf, key)?;
+        Ok(buf)
+    }
+
     /// Grava o cofre em disco como KDBX 4 usando escrita atômica (arquivo temporário + `sync_all` + `rename`).
     pub fn save(
         &self,
@@ -224,8 +238,7 @@ impl Vault {
         keyfile: Option<&Path>,
     ) -> Result<()> {
         let keyfile_bytes = keyfile.map(fs::read).transpose()?;
-        let key = build_database_key(password.as_ref(), keyfile_bytes.as_deref())?;
-        drop(password);
+        let bytes = self.save_to_bytes(password, keyfile_bytes.as_deref())?;
 
         let parent = path
             .parent()
@@ -243,7 +256,7 @@ impl Vault {
                 opts.mode(0o600);
             }
             let mut file = opts.open(&tmp_path)?;
-            self.db.save(&mut file, key)?;
+            file.write_all(&bytes)?;
             file.flush()?;
             file.sync_all()?;
             drop(file);

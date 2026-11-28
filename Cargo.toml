@@ -7,6 +7,7 @@ members = [
     "crates/bkp-protocol",
     "crates/bkp-platform",
     "crates/bkp-proxy",
+    "crates/bkp-ffi",
 ]
 exclude = ["fuzz", "apps/desktop/src-tauri"]
 

@@ -8,9 +8,9 @@ Para permitir o uso de passkeys fora dos navegadores (aplicativos nativos, termi
 - **Windows:** implementação da *Windows Plugin Authenticator API* (WebAuthn 2024+).
 - **macOS:** extensão `ASCredentialProviderExtension` via `objc2` compartilhando acesso ao cofre.
 
-## 2. Aplicativo Mobile (Tauri Mobile)
+## 2. Aplicativo Mobile (Kotlin nativo + UniFFI)
 
-A separação em crates (`bkp-core`, `bkp-passkey`, `bkp-protocol`) permite compilar o mesmo frontend React + HeroUI e o núcleo Rust para Android/iOS usando `tauri android` / `tauri ios` sem reescrever lógica de KDBX ou passkeys.
+A separação em crates (`bkp-core`, `bkp-passkey`) permite reutilizar todo o núcleo Rust no Android via fachada UniFFI (`bkp-ffi`), com interface nativa em Kotlin + Jetpack Compose, Storage Access Framework (SAF) para `.kdbx`, desbloqueio biométrico via Android Keystore, `AutofillService` e provedor de passkeys no `CredentialProviderService` (Android 14+).
 
 ## 3. Sincronização opcional baseada em merge
 

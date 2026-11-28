@@ -10,6 +10,7 @@ Sucessor open source do KeePassXC: um gerenciador de senhas moderno, focado em s
 - **Integrações (`crates/bkp-platform`):** clipboard com auto-clear, parser/trait Auto-Type, servidor `ssh-agent` Ed25519 em socket Unix, modelo Secret Service, Quick Unlock e YubiKey challenge-response.
 - **CLI (`crates/bkp-cli`):** binário `bkp` (`db-create`, `ls`, `search`, `show`, `add`, `edit`, `rm`, `mkdir`, `attach-add`, `attach-export`, `history`, `generate`, `passphrase`, `totp`, `health`, `merge`, `import`, `export-csv`, `migrate-kdbx4`).
 - **Desktop (`apps/desktop`):** Tauri v2 + React 19 + Tailwind CSS v4 + HeroUI + TanStack Query + Zustand + i18n (`pt-BR` e `en`), Command Palette (`Ctrl+K`), modo apresentação e aviso de configuração gerenciada pelo Nix.
+- **Android (`apps/android` + `crates/bkp-ffi`):** aplicativo nativo em Kotlin + Jetpack Compose + Material 3 reutilizando `bkp-core` e `bkp-passkey` via UniFFI, com Storage Access Framework (SAF), desbloqueio biométrico (Android Keystore), `AutofillService` e provedor de passkeys (`CredentialProviderService`, Android 14+).
 - **Extensão (`extension/`):** WebExtension MV3 (WXT + TypeScript) com interceptação WebAuthn no *MAIN world*, autofill e fallback para autenticador nativo.
 - **NixOS (`nix/`):** `flake.nix` com pacote (`bkp` e `bkp-proxy`), módulos NixOS e Home Manager (`browserIntegration`, `secretService`, `sshAgent`, `autostart`, `settings`) e teste de VM em [nix/tests/nixos-module-test.nix](nix/tests/nixos-module-test.nix).
 
@@ -32,6 +33,12 @@ nix flake check -L
 ```bash
 cd extension && pnpm install && pnpm typecheck && pnpm test && pnpm build
 cd apps/desktop && pnpm install && pnpm typecheck && pnpm test && pnpm build
+```
+
+## Android (Kotlin + Compose + UniFFI)
+
+```bash
+nix develop .#android --command bash -c "cd apps/android && gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon"
 ```
 
 ## Documentação

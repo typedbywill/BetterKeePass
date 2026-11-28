@@ -142,6 +142,61 @@ fn open_keepassxc_fixture() {
 }
 
 #[test]
+fn roundtrip_save_to_bytes_and_open_from_bytes() {
+    let mut vault = Vault::create(Some("In-Memory Vault"));
+    let uuid = vault
+        .add_entry(
+            Some("Android/Contas"),
+            NewEntry {
+                title: "Proton".to_owned(),
+                username: Some("alice@proton.me".to_owned()),
+                password: Some(SecretString::from("p@ss-in-memory-42".to_owned())),
+                url: Some("https://proton.me".to_owned()),
+                notes: Some("Nota em memória".to_owned()),
+                tags: vec!["Email".to_owned()],
+                custom_fields: vec![CustomFieldInput {
+                    name: "AndroidApp".to_owned(),
+                    value: SecretString::from("ch.protonmail.android".to_owned()),
+                    protected: false,
+                }],
+            },
+        )
+        .unwrap();
+
+    let pw = SecretString::from("bytes-master-key".to_owned());
+    let keyfile = b"arbitrary-keyfile-bytes-0123456789";
+    let kdbx_bytes = vault
+        .save_to_bytes(Some(pw.clone()), Some(keyfile))
+        .unwrap();
+    assert!(!kdbx_bytes.is_empty());
+
+    assert!(
+        Vault::open_from_bytes(
+            &kdbx_bytes,
+            Some(SecretString::from("wrong".to_owned())),
+            Some(keyfile)
+        )
+        .is_err()
+    );
+    assert!(Vault::open_from_bytes(&kdbx_bytes, Some(pw.clone()), None).is_err());
+
+    let reopened = Vault::open_from_bytes(&kdbx_bytes, Some(pw), Some(keyfile)).unwrap();
+    assert_eq!(reopened.database_name(), Some("In-Memory Vault"));
+    let details = reopened.entry_details(uuid, true).unwrap();
+    assert_eq!(details.summary.title, "Proton");
+    assert_eq!(
+        details.password.as_ref().map(ExposeSecret::expose_secret),
+        Some("p@ss-in-memory-42")
+    );
+    assert_eq!(details.custom_fields.len(), 1);
+    assert_eq!(details.custom_fields[0].name, "AndroidApp");
+    assert_eq!(
+        details.custom_fields[0].value.as_deref(),
+        Some("ch.protonmail.android")
+    );
+}
+
+#[test]
 fn totp_rfc6238_sha1_vector() {
     let uri = "otpauth://totp/RFC6238:test?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&period=30&digits=8&algorithm=SHA1";
     let code = totp_from_uri_at(uri, 59).unwrap();

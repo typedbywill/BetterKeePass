@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BetterKeePass</string>
+    <string name="autofill_service_label">BetterKeePass Preenchimento Automático</string>
+    <string name="credential_provider_label">BetterKeePass (Senhas e Passkeys)</string>
+
+    <string name="unlock_title">Desbloquear cofre</string>
+    <string name="unlock_select_vault">Selecionar arquivo .kdbx</string>
+    <string name="unlock_create_vault">Criar novo cofre</string>
+    <string name="unlock_recent_vaults">Cofres recentes</string>
+    <string name="unlock_master_password">Senha mestra</string>
+    <string name="unlock_keyfile_optional">Arquivo-chave (opcional)</string>
+    <string name="unlock_keyfile_selected">Arquivo-chave selecionado: %1$s</string>
+    <string name="unlock_action">Desbloquear</string>
+    <string name="unlock_biometric">Desbloquear com biometria</string>
+    <string name="unlock_biometric_prompt_title">Desbloquear BetterKeePass</string>
+    <string name="unlock_biometric_prompt_subtitle">Use sua biometria para acessar o cofre</string>
+    <string name="unlock_biometric_enable_title">Ativar desbloqueio biométrico</string>
+    <string name="unlock_biometric_enable_subtitle">Confirme sua biometria para proteger a senha mestra</string>
+    <string name="unlock_biometric_invalidated">Biometria invalidada após alteração no dispositivo. Informe a senha mestra.</string>
+    <string name="unlock_error_wrong_key">Senha mestra ou arquivo-chave incorreto.</string>
+    <string name="unlock_error_corrupt">Não foi possível ler o arquivo .kdbx.</string>
+    <string name="unlock_error_io">Falha ao acessar o arquivo selecionado.</string>
+
+    <string name="create_vault_title">Novo cofre KDBX 4</string>
+    <string name="create_vault_name">Nome do cofre</string>
+    <string name="create_vault_confirm_password">Confirmar senha mestra</string>
+    <string name="create_vault_password_mismatch">As senhas não coincidem.</string>
+    <string name="create_vault_save">Criar e salvar</string>
+
+    <string name="vault_search_placeholder">Buscar entradas (title:, user:, url:, tag:)</string>
+    <string name="vault_all_groups">Todas</string>
+    <string name="vault_empty">Nenhuma entrada encontrada.</string>
+    <string name="vault_lock">Bloquear</string>
+    <string name="vault_settings">Configurações</string>
+    <string name="vault_add_entry">Nova entrada</string>
+    <string name="vault_conflict_title">Arquivo alterado externamente</string>
+    <string name="vault_conflict_message">O arquivo .kdbx foi modificado fora do app. Deseja mesclar as alterações antes de salvar?</string>
+    <string name="vault_conflict_merge">Mesclar e salvar</string>
+    <string name="vault_conflict_overwrite">Sobrescrever</string>
+
+    <string name="detail_username">Usuário</string>
+    <string name="detail_password">Senha</string>
+    <string name="detail_url">URL</string>
+    <string name="detail_notes">Notas</string>
+    <string name="detail_totp">Código TOTP</string>
+    <string name="detail_custom_fields">Campos personalizados</string>
+    <string name="detail_tags">Tags</string>
+    <string name="detail_attachments">Anexos</string>
+    <string name="detail_history">Histórico</string>
+    <string name="detail_copy">Copiar</string>
+    <string name="detail_copied">Copiado para a área de transferência</string>
+    <string name="detail_reveal">Revelar</string>
+    <string name="detail_hide">Ocultar</string>
+    <string name="detail_edit">Editar</string>
+    <string name="detail_delete">Excluir</string>
+    <string name="detail_restore">Restaurar</string>
+    <string name="detail_passkey_badge">Passkey</string>
+
+    <string name="editor_new_title">Nova entrada</string>
+    <string name="editor_edit_title">Editar entrada</string>
+    <string name="editor_title_label">Título</string>
+    <string name="editor_group_label">Grupo (ex: Contas/Email)</string>
+    <string name="editor_generate_password">Gerar senha</string>
+    <string name="editor_generate_passphrase">Gerar passphrase</string>
+    <string name="editor_add_field">Adicionar campo</string>
+    <string name="editor_field_name">Nome do campo</string>
+    <string name="editor_field_value">Valor</string>
+    <string name="editor_field_protected">Protegido</string>
+    <string name="editor_save">Salvar</string>
+
+    <string name="settings_title">Configurações</string>
+    <string name="settings_biometric">Desbloqueio biométrico</string>
+    <string name="settings_biometric_desc">Armazena a senha cifrada com chave do Android Keystore</string>
+    <string name="settings_lock_timeout">Bloqueio automático (minutos)</string>
+    <string name="settings_clipboard_timeout">Limpar área de transferência (segundos)</string>
+    <string name="settings_autofill">Ativar Preenchimento Automático</string>
+    <string name="settings_autofill_active">Serviço de preenchimento ativo</string>
+    <string name="settings_autofill_inactive">Toque para definir o BetterKeePass como provedor</string>
+    <string name="settings_passkeys">Passkeys (Credential Manager)</string>
+    <string name="settings_passkeys_desc">Ative nas configurações do sistema em Senhas e contas</string>
+
+    <string name="autofill_unlock_title">Desbloquear para preencher</string>
+    <string name="autofill_save_title">Salvar no BetterKeePass</string>
+    <string name="passkey_create_title">Criar passkey</string>
+    <string name="passkey_get_title">Usar passkey</string>
+    <string name="cancel">Cancelar</string>
+</resources>

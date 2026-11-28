@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     crane.url = "github:ipetkov/crane";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -11,6 +15,7 @@
       self,
       nixpkgs,
       crane,
+      rust-overlay,
     }:
     let
       systems = [
@@ -69,7 +74,8 @@
         pkgs:
         let
           craneLib = crane.mkLib pkgs;
-          tauriLinuxDeps = pkgs.lib.optionals pkgs.stdenv.isLinux (
+          system = pkgs.stdenv.hostPlatform.system;
+          tauriLinuxDeps = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
             with pkgs;
             [
               webkitgtk_4_1
@@ -80,6 +86,53 @@
               librsvg
             ]
           );
+          androidShell =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              let
+                pkgsAndroid = import nixpkgs {
+                  inherit system;
+                  overlays = [ rust-overlay.overlays.default ];
+                  config = {
+                    allowUnfree = true;
+                    android_sdk.accept_license = true;
+                  };
+                };
+                androidComposition = pkgsAndroid.androidenv.composeAndroidPackages {
+                  buildToolsVersions = [ "35.0.0" ];
+                  platformVersions = [ "35" ];
+                  includeNDK = true;
+                  ndkVersions = [ "27.2.12479018" ];
+                  includeEmulator = false;
+                  includeSystemImages = false;
+                };
+                rustAndroidToolchain = pkgsAndroid.rust-bin.stable.latest.default.override {
+                  extensions = [
+                    "rust-src"
+                    "rust-analyzer"
+                  ];
+                  targets = [
+                    "aarch64-linux-android"
+                    "armv7-linux-androideabi"
+                    "x86_64-linux-android"
+                  ];
+                };
+              in
+              pkgsAndroid.mkShell {
+                packages = [
+                  rustAndroidToolchain
+                  pkgsAndroid.cargo-ndk
+                  pkgsAndroid.gradle
+                  pkgsAndroid.jdk17
+                  androidComposition.androidsdk
+                ];
+                ANDROID_HOME = "${androidComposition.androidsdk}/libexec/android-sdk";
+                ANDROID_SDK_ROOT = "${androidComposition.androidsdk}/libexec/android-sdk";
+                ANDROID_NDK_HOME = "${androidComposition.androidsdk}/libexec/android-sdk/ndk-bundle";
+                JAVA_HOME = "${pkgsAndroid.jdk17}";
+                GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidComposition.androidsdk}/libexec/android-sdk/build-tools/35.0.0/aapt2";
+              }
+            else
+              craneLib.devShell { };
         in
         {
           default = craneLib.devShell {
@@ -96,6 +149,7 @@
               ]
               ++ tauriLinuxDeps;
           };
+          android = androidShell;
         }
       );
 
