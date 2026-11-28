@@ -4,10 +4,7 @@
     <string name="autofill_service_label">BetterKeePass Preenchimento Automático</string>
     <string name="credential_provider_label">BetterKeePass (Senhas e Passkeys)</string>
 
-    <string name="unlock_title">Desbloquear cofre</string>
-    <string name="unlock_select_vault">Selecionar arquivo .kdbx</string>
     <string name="unlock_create_vault">Criar novo cofre</string>
-    <string name="unlock_recent_vaults">Cofres recentes</string>
     <string name="unlock_master_password">Senha mestra</string>
     <string name="unlock_keyfile_optional">Arquivo-chave (opcional)</string>
     <string name="unlock_keyfile_selected">Arquivo-chave selecionado: %1$s</string>
@@ -28,9 +25,6 @@
     <string name="create_vault_password_mismatch">As senhas não coincidem.</string>
     <string name="create_vault_save">Criar e salvar</string>
 
-    <string name="vault_search_placeholder">Buscar entradas (title:, user:, url:, tag:)</string>
-    <string name="vault_all_groups">Todas</string>
-    <string name="vault_empty">Nenhuma entrada encontrada.</string>
     <string name="vault_lock">Bloquear</string>
     <string name="vault_settings">Configurações</string>
     <string name="vault_add_entry">Nova entrada</string>
@@ -72,8 +66,6 @@
     <string name="settings_title">Configurações</string>
     <string name="settings_biometric">Desbloqueio biométrico</string>
     <string name="settings_biometric_desc">Armazena a senha cifrada com chave do Android Keystore</string>
-    <string name="settings_lock_timeout">Bloqueio automático (minutos)</string>
-    <string name="settings_clipboard_timeout">Limpar área de transferência (segundos)</string>
     <string name="settings_autofill">Ativar Preenchimento Automático</string>
     <string name="settings_autofill_active">Serviço de preenchimento ativo</string>
     <string name="settings_autofill_inactive">Toque para definir o BetterKeePass como provedor</string>
@@ -86,25 +78,41 @@
     <string name="passkey_get_title">Usar passkey</string>
     <string name="cancel">Cancelar</string>
 
-    <string name="unlock_overline">SEUS DADOS, NO SEU DISPOSITIVO</string>
-    <string name="unlock_welcome_title">Seu espaço seguro, do seu jeito.</string>
-    <string name="unlock_welcome_desc">Abra seu cofre para acessar suas senhas e passkeys, ou crie um novo para começar.</string>
-    <string name="unlock_your_vaults">SEUS COFRES</string>
-    <string name="unlock_no_recent_title">Nenhum cofre ainda</string>
-    <string name="unlock_no_recent_desc">Seus cofres abertos recentemente aparecerão aqui.</string>
-    <string name="unlock_selected_vault">Cofre selecionado</string>
-    <string name="unlock_or_password">ou use a senha mestra</string>
     <string name="unlock_keyfile_remove">Remover arquivo-chave</string>
-    <string name="unlock_tip">Seu cofre permanece neste dispositivo e nunca é enviado automaticamente.</string>
     <string name="strength_weak">Fraca</string>
     <string name="strength_fair">Razoável</string>
     <string name="strength_good">Boa</string>
     <string name="strength_strong">Forte</string>
-    <string name="settings_appearance">APARÊNCIA</string>
     <string name="settings_theme_system">Sistema</string>
     <string name="settings_theme_light">Claro</string>
     <string name="settings_theme_dark">Escuro</string>
     <string name="settings_theme_preset">Tema</string>
     <string name="settings_dynamic_color">Cores do sistema</string>
     <string name="settings_dynamic_color_desc">Usa as cores do papel de parede (Material You)</string>
+    <string name="unlock_switch_vault">Trocar de cofre</string>
+    <string name="unlock_open_vault">Abrir arquivo .kdbx</string>
+    <string name="vault_search_placeholder">Buscar no cofre</string>
+    <string name="vault_search_clear">Limpar busca</string>
+    <string name="vault_back">Voltar</string>
+    <string name="vault_filter_all">Todos</string>
+    <string name="vault_filter_totp">Com TOTP</string>
+    <string name="vault_filter_passkey">Passkeys</string>
+    <string name="vault_recycle_bin">Lixeira</string>
+    <string name="vault_empty_folder">Pasta vazia</string>
+    <string name="vault_no_results">Nada encontrado</string>
+    <string name="vault_folders">PASTAS</string>
+    <string name="vault_entries">ENTRADAS</string>
+    <string name="vault_root">Raiz</string>
+    <string name="settings_category_appearance">Aparência</string>
+    <string name="settings_category_appearance_desc">Tema e cores</string>
+    <string name="settings_category_security">Segurança</string>
+    <string name="settings_category_security_desc">Biometria, bloqueio e área de transferência</string>
+    <string name="settings_category_autofill">Preenchimento e passkeys</string>
+    <string name="settings_category_autofill_desc">Integração com o Android</string>
+    <string name="settings_lock_timeout">Bloqueio automático</string>
+    <string name="settings_lock_immediately">Imediatamente</string>
+    <string name="settings_lock_after">Após %1$d min em segundo plano</string>
+    <string name="settings_clipboard_timeout">Limpar área de transferência</string>
+    <string name="settings_clipboard_after">Após %1$d segundos</string>
+    <string name="unlock_title">Desbloquear cofre</string>
 </resources>

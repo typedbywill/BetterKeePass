@@ -13,43 +13,36 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.betterkeepass.R
 import app.betterkeepass.ui.common.FlagSecureEffect
-import kotlinx.coroutines.launch
+import app.betterkeepass.ui.components.Avatar
+import app.betterkeepass.ui.components.CopyField
+import app.betterkeepass.ui.components.ProgressRing
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -61,9 +54,6 @@ fun EntryDetailScreen(
     FlagSecureEffect()
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val copiedMsg = stringResource(R.string.detail_copied)
 
     LaunchedEffect(uiState.isDeleted) {
         if (uiState.isDeleted) onBack()
@@ -72,7 +62,7 @@ fun EntryDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(uiState.details?.summary?.title ?: "") },
+                title = {},
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
@@ -90,7 +80,6 @@ fun EntryDetailScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         val details = uiState.details ?: return@Scaffold
         Column(
@@ -98,22 +87,34 @@ fun EntryDetailScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Avatar(details.summary.title, iconId = details.summary.iconId?.toInt(), size = 72.dp)
+                Text(
+                    details.summary.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
             if (details.summary.username.isNotBlank()) {
-                FieldCard(
+                CopyField(
                     label = stringResource(R.string.detail_username),
                     value = details.summary.username,
                     onCopy = {
                         viewModel.copyUsername()
-                        scope.launch { snackbarHostState.showSnackbar(copiedMsg) }
                     },
                 )
             }
 
             if (details.summary.hasPassword) {
-                FieldCard(
+                CopyField(
                     label = stringResource(R.string.detail_password),
                     value = uiState.revealedPassword ?: "••••••••••••",
                     monospace = uiState.revealedPassword != null,
@@ -121,67 +122,46 @@ fun EntryDetailScreen(
                     isRevealed = uiState.revealedPassword != null,
                     onCopy = {
                         viewModel.copyPassword()
-                        scope.launch { snackbarHostState.showSnackbar(copiedMsg) }
                     },
                 )
             }
 
             uiState.otp?.let { otp ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column {
-                            Text(
-                                text = stringResource(R.string.detail_totp),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Text(
-                                text = otp.code,
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
-                        val progress = if (otp.periodSecs > 0uL) {
-                            otp.validForSecs.toFloat() / otp.periodSecs.toFloat()
-                        } else {
-                            0f
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CircularProgressIndicator(
-                                progress = { progress },
-                                modifier = Modifier.size(32.dp),
-                            )
-                            Text("${otp.validForSecs}s")
-                        }
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CopyField(
+                        label = stringResource(R.string.detail_totp),
+                        value = otp.code.chunked(3).joinToString(" "),
+                        monospace = true,
+                        modifier = Modifier.weight(1f),
+                        onCopy = viewModel::copyTotp,
+                        copyOnValueClick = true,
+                    )
+                    ProgressRing(otp.validForSecs.toInt(), otp.periodSecs.toInt())
+                    Text(
+                        "${otp.validForSecs}s",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 8.dp, end = 20.dp),
+                    )
                 }
             }
 
             if (details.summary.url.isNotBlank()) {
-                FieldCard(
+                CopyField(
                     label = stringResource(R.string.detail_url),
                     value = details.summary.url,
                 )
             }
 
             if (details.notes.isNotBlank()) {
-                FieldCard(
+                CopyField(
                     label = stringResource(R.string.detail_notes),
                     value = details.notes,
                 )
             }
 
             if (details.summary.tags.isNotEmpty()) {
-                Text(stringResource(R.string.detail_tags), style = MaterialTheme.typography.titleSmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.detail_tags), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 20.dp, top = 16.dp))
+                FlowRow(modifier = Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     details.summary.tags.forEach { tag ->
                         AssistChip(onClick = {}, label = { Text(tag) })
                     }
@@ -192,6 +172,7 @@ fun EntryDetailScreen(
                 Text(
                     stringResource(R.string.detail_custom_fields),
                     style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(start = 20.dp, top = 16.dp),
                 )
                 details.customFields.forEach { field ->
                     val display = if (field.protected) {
@@ -199,7 +180,7 @@ fun EntryDetailScreen(
                     } else {
                         field.value ?: ""
                     }
-                    FieldCard(
+                    CopyField(
                         label = field.name,
                         value = display,
                         monospace = !field.protected || uiState.revealedFields.containsKey(field.name),
@@ -211,23 +192,18 @@ fun EntryDetailScreen(
                         isRevealed = uiState.revealedFields.containsKey(field.name),
                         onCopy = {
                             viewModel.copyCustomField(field.name)
-                            scope.launch { snackbarHostState.showSnackbar(copiedMsg) }
                         },
                     )
                 }
             }
 
             if (uiState.history.isNotEmpty()) {
-                Text(stringResource(R.string.detail_history), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.detail_history), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 20.dp, top = 16.dp))
                 uiState.history.forEach { item ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(item.title, style = MaterialTheme.typography.bodyMedium)
                                 Text(
@@ -240,7 +216,6 @@ fun EntryDetailScreen(
                                 Icon(Icons.Default.Restore, contentDescription = null)
                                 Text(stringResource(R.string.detail_restore))
                             }
-                        }
                     }
                 }
             }
@@ -263,46 +238,5 @@ fun EntryDetailScreen(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun FieldCard(
-    label: String,
-    value: String,
-    monospace: Boolean = false,
-    isRevealed: Boolean = false,
-    onRevealToggle: (() -> Unit)? = null,
-    onCopy: (() -> Unit)? = null,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.labelMedium)
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
-                )
-            }
-            if (onRevealToggle != null) {
-                IconButton(onClick = onRevealToggle) {
-                    Icon(
-                        imageVector = if (isRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = stringResource(if (isRevealed) R.string.detail_hide else R.string.detail_reveal),
-                    )
-                }
-            }
-            if (onCopy != null) {
-                IconButton(onClick = onCopy) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.detail_copy))
-                }
-            }
-        }
     }
 }

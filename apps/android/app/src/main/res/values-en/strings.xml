@@ -4,10 +4,7 @@
     <string name="autofill_service_label">BetterKeePass Autofill</string>
     <string name="credential_provider_label">BetterKeePass (Passwords &amp; Passkeys)</string>
 
-    <string name="unlock_title">Unlock vault</string>
-    <string name="unlock_select_vault">Select .kdbx file</string>
     <string name="unlock_create_vault">Create new vault</string>
-    <string name="unlock_recent_vaults">Recent vaults</string>
     <string name="unlock_master_password">Master password</string>
     <string name="unlock_keyfile_optional">Keyfile (optional)</string>
     <string name="unlock_keyfile_selected">Keyfile selected: %1$s</string>
@@ -28,9 +25,6 @@
     <string name="create_vault_password_mismatch">Passwords do not match.</string>
     <string name="create_vault_save">Create and save</string>
 
-    <string name="vault_search_placeholder">Search entries (title:, user:, url:, tag:)</string>
-    <string name="vault_all_groups">All</string>
-    <string name="vault_empty">No entries found.</string>
     <string name="vault_lock">Lock</string>
     <string name="vault_settings">Settings</string>
     <string name="vault_add_entry">New entry</string>
@@ -72,8 +66,6 @@
     <string name="settings_title">Settings</string>
     <string name="settings_biometric">Biometric unlock</string>
     <string name="settings_biometric_desc">Stores encrypted password with an Android Keystore key</string>
-    <string name="settings_lock_timeout">Auto-lock timeout (minutes)</string>
-    <string name="settings_clipboard_timeout">Clear clipboard (seconds)</string>
     <string name="settings_autofill">Enable Autofill</string>
     <string name="settings_autofill_active">Autofill service is active</string>
     <string name="settings_autofill_inactive">Tap to set BetterKeePass as autofill provider</string>
@@ -86,25 +78,41 @@
     <string name="passkey_get_title">Use passkey</string>
     <string name="cancel">Cancel</string>
 
-    <string name="unlock_overline">YOUR DATA, ON YOUR DEVICE</string>
-    <string name="unlock_welcome_title">Your secure space, your way.</string>
-    <string name="unlock_welcome_desc">Open your vault to access your passwords and passkeys, or create a new one to get started.</string>
-    <string name="unlock_your_vaults">YOUR VAULTS</string>
-    <string name="unlock_no_recent_title">No vaults yet</string>
-    <string name="unlock_no_recent_desc">Your recently opened vaults will appear here.</string>
-    <string name="unlock_selected_vault">Selected vault</string>
-    <string name="unlock_or_password">or use the master password</string>
     <string name="unlock_keyfile_remove">Remove keyfile</string>
-    <string name="unlock_tip">Your vault stays on this device and is never uploaded automatically.</string>
     <string name="strength_weak">Weak</string>
     <string name="strength_fair">Fair</string>
     <string name="strength_good">Good</string>
     <string name="strength_strong">Strong</string>
-    <string name="settings_appearance">APPEARANCE</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_preset">Theme</string>
     <string name="settings_dynamic_color">System colors</string>
     <string name="settings_dynamic_color_desc">Use wallpaper colors (Material You)</string>
+    <string name="unlock_switch_vault">Switch vault</string>
+    <string name="unlock_open_vault">Open .kdbx file</string>
+    <string name="vault_search_placeholder">Search vault</string>
+    <string name="vault_search_clear">Clear search</string>
+    <string name="vault_back">Back</string>
+    <string name="vault_filter_all">All</string>
+    <string name="vault_filter_totp">With TOTP</string>
+    <string name="vault_filter_passkey">Passkeys</string>
+    <string name="vault_recycle_bin">Recycle bin</string>
+    <string name="vault_empty_folder">Empty folder</string>
+    <string name="vault_no_results">Nothing found</string>
+    <string name="vault_folders">FOLDERS</string>
+    <string name="vault_entries">ENTRIES</string>
+    <string name="vault_root">Root</string>
+    <string name="settings_category_appearance">Appearance</string>
+    <string name="settings_category_appearance_desc">Theme and colors</string>
+    <string name="settings_category_security">Security</string>
+    <string name="settings_category_security_desc">Biometrics, auto-lock and clipboard</string>
+    <string name="settings_category_autofill">Autofill and passkeys</string>
+    <string name="settings_category_autofill_desc">Android integration</string>
+    <string name="settings_lock_timeout">Auto-lock</string>
+    <string name="settings_lock_immediately">Immediately</string>
+    <string name="settings_lock_after">After %1$d min in background</string>
+    <string name="settings_clipboard_timeout">Clear clipboard</string>
+    <string name="settings_clipboard_after">After %1$d seconds</string>
+    <string name="unlock_title">Unlock vault</string>
 </resources>

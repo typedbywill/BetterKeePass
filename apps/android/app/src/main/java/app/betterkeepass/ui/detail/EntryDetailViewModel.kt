@@ -122,6 +122,14 @@ class EntryDetailViewModel @Inject constructor(
         }
     }
 
+    fun copyTotp() {
+        viewModelScope.launch {
+            val code = runCatching { repository.totp(entryUuid) }.getOrNull()?.code ?: return@launch
+            val timeout = settings.clipboardTimeoutSeconds.first()
+            clipboard.copySensitive("totp", code, timeout)
+        }
+    }
+
     fun copyCustomField(name: String) {
         viewModelScope.launch {
             val value = _uiState.value.revealedFields[name]

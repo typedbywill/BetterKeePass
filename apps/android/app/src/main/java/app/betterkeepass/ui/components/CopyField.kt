@@ -1,7 +1,7 @@
 package app.betterkeepass.ui.components
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +14,6 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +42,7 @@ fun CopyField(
     isRevealed: Boolean = false,
     onRevealToggle: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
+    copyOnValueClick: Boolean = false,
 ) {
     val colors = BkpTheme.colors
     val view = LocalView.current
@@ -55,17 +55,20 @@ fun CopyField(
             showCheck = false
         }
     }
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = colors.surface,
-        border = BorderStroke(1.dp, colors.border),
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+    val copy = {
+        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        onCopy?.invoke()
+        copies++
+    }
+    Row(
+        modifier = modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(
+                Modifier.weight(1f).then(
+                    if (copyOnValueClick && onCopy != null) Modifier.clickable(onClick = copy) else Modifier,
+                ),
+            ) {
                 Text(label, style = MaterialTheme.typography.labelMedium, color = colors.fgSubtle)
                 Text(
                     value,
@@ -83,11 +86,7 @@ fun CopyField(
             }
             if (onCopy != null) {
                 IconButton(
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                        onCopy()
-                        copies++
-                    },
+                    onClick = copy,
                 ) {
                     Icon(
                         imageVector = if (showCheck) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
@@ -97,5 +96,4 @@ fun CopyField(
                 }
             }
         }
-    }
 }

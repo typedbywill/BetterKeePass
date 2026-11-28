@@ -1,5 +1,6 @@
 package app.betterkeepass
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,19 +40,19 @@ class MainActivity : FragmentActivity() {
         setContent {
             BkpTheme(settings) {
                 val session by vaultRepository.session.collectAsStateWithLifecycle()
-                val navController = rememberNavController()
-
                 when (val current = session) {
                     VaultSessionState.Locked -> {
                         UnlockScreen()
                     }
                     is VaultSessionState.Unlocked -> {
+                        // Created per session, so another vault never inherits screens or folders.
+                        val navController = rememberNavController()
                         NavHost(navController = navController, startDestination = "list") {
                             composable("list") {
                                 VaultListScreen(
                                     vaultName = current.displayName,
                                     onEntryClick = { uuid -> navController.navigate("detail/$uuid") },
-                                    onAddEntry = { navController.navigate("editor") },
+                                    onAddEntry = { group -> navController.navigate("editor?group=${Uri.encode(group)}") },
                                     onOpenSettings = { navController.navigate("settings") },
                                 )
                             }
@@ -65,13 +66,17 @@ class MainActivity : FragmentActivity() {
                                 )
                             }
                             composable(
-                                route = "editor?uuid={uuid}",
+                                route = "editor?uuid={uuid}&group={group}",
                                 arguments = listOf(
                                     navArgument("uuid") {
                                         type = NavType.StringType
                                         nullable = true
                                         defaultValue = null
-                                    }
+                                    },
+                                    navArgument("group") {
+                                        type = NavType.StringType
+                                        defaultValue = ""
+                                    },
                                 ),
                             ) {
                                 EntryEditorScreen(onBack = { navController.popBackStack() })

@@ -199,6 +199,9 @@ class VaultRepository @Inject constructor(
 
     suspend fun search(query: String): List<EntrySummaryDto> = withHandle { it.search(query) }
 
+    suspend fun listEntries(groupPath: String?): List<EntrySummaryDto> =
+        withHandle { it.listEntries(groupPath, false) }
+
     suspend fun groupTree(): GroupNodeDto = withHandle { it.groupTree() }
 
     suspend fun entryDetails(uuid: String): EntryDetailsDto = withHandle { it.entryDetails(uuid) }

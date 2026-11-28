@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -32,6 +31,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import app.betterkeepass.ui.theme.BkpTheme
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.key
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,108 +67,141 @@ fun SettingsScreen(
     var showEnrollPasswordDialog by remember { mutableStateOf(false) }
     var enrollPassword by remember { mutableStateOf("") }
 
+    // Null shows the category list; back returns to it before leaving settings.
+    var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    BackHandler(enabled = page != null) { page = null }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = { Text(stringResource(page?.title ?: R.string.settings_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    IconButton(onClick = { if (page != null) page = null else onBack() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.vault_back),
+                        )
                     }
                 },
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            AppearanceSection(
-                appearance = appearance,
-                onModeChange = viewModel::setThemeMode,
-                onPresetChange = viewModel::setThemePreset,
-                onDynamicColorChange = viewModel::setDynamicColor,
-            )
-            HorizontalDivider()
-
-            if (uiState.currentVaultUri != null) {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.settings_biometric)) },
-                    supportingContent = { Text(stringResource(R.string.settings_biometric_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = uiState.biometricEnabled,
-                            onCheckedChange = { enabled ->
-                                if (enabled) {
-                                    showEnrollPasswordDialog = true
-                                } else {
-                                    viewModel.disableBiometric()
-                                }
+        key(page) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when (page) {
+                    null -> SettingsPage.entries.forEach { item ->
+                        ListItem(
+                            headlineContent = { Text(stringResource(item.title)) },
+                            supportingContent = { Text(stringResource(item.description)) },
+                            leadingContent = {
+                                Icon(item.icon, contentDescription = null, tint = BkpTheme.colors.accent)
                             },
-                        )
-                    },
-                )
-                HorizontalDivider()
-            }
-
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${stringResource(R.string.settings_lock_timeout)}: ${uiState.lockTimeoutMinutes} min")
-                Slider(
-                    value = uiState.lockTimeoutMinutes.toFloat(),
-                    onValueChange = { viewModel.setLockTimeout(it.roundToInt()) },
-                    valueRange = 0f..30f,
-                )
-
-                Text("${stringResource(R.string.settings_clipboard_timeout)}: ${uiState.clipboardTimeoutSeconds}s")
-                Slider(
-                    value = uiState.clipboardTimeoutSeconds.toFloat(),
-                    onValueChange = { viewModel.setClipboardTimeout(it.roundToInt()) },
-                    valueRange = 5f..120f,
-                )
-            }
-            HorizontalDivider()
-
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_autofill)) },
-                supportingContent = {
-                    Text(
-                        stringResource(
-                            if (isAutofillActive) {
-                                R.string.settings_autofill_active
-                            } else {
-                                R.string.settings_autofill_inactive
+                            trailingContent = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = BkpTheme.colors.fgSubtle,
+                                )
                             },
+                            modifier = Modifier.clickable { page = item }.padding(vertical = 4.dp),
                         )
+                    }
+
+                    SettingsPage.Appearance -> AppearanceSection(
+                        appearance = appearance,
+                        onModeChange = viewModel::setThemeMode,
+                        onPresetChange = viewModel::setThemePreset,
+                        onDynamicColorChange = viewModel::setDynamicColor,
                     )
-                },
-                modifier = Modifier.clickable {
-                    val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    runCatching { context.startActivity(intent) }
-                },
-            )
-            HorizontalDivider()
 
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_passkeys)) },
-                supportingContent = { Text(stringResource(R.string.settings_passkeys_desc)) },
-                modifier = Modifier.clickable {
-                    val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        Settings.ACTION_CREDENTIAL_PROVIDER
-                    } else {
-                        Settings.ACTION_SYNC_SETTINGS
-                    }
-                    val intent = Intent(action).apply {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                            data = Uri.parse("package:${context.packageName}")
+                    SettingsPage.Security -> {
+                        if (uiState.currentVaultUri != null) {
+                            ListItem(
+                                headlineContent = { Text(stringResource(R.string.settings_biometric)) },
+                                supportingContent = { Text(stringResource(R.string.settings_biometric_desc)) },
+                                trailingContent = {
+                                    Switch(
+                                        checked = uiState.biometricEnabled,
+                                        onCheckedChange = { enabled ->
+                                            if (enabled) {
+                                                showEnrollPasswordDialog = true
+                                            } else {
+                                                viewModel.disableBiometric()
+                                            }
+                                        },
+                                    )
+                                },
+                            )
                         }
+                        SliderSetting(
+                            title = stringResource(R.string.settings_lock_timeout),
+                            summary = if (uiState.lockTimeoutMinutes == 0) {
+                                stringResource(R.string.settings_lock_immediately)
+                            } else {
+                                stringResource(R.string.settings_lock_after, uiState.lockTimeoutMinutes)
+                            },
+                            value = uiState.lockTimeoutMinutes,
+                            range = 0f..30f,
+                            onChange = viewModel::setLockTimeout,
+                        )
+                        SliderSetting(
+                            title = stringResource(R.string.settings_clipboard_timeout),
+                            summary = stringResource(
+                                R.string.settings_clipboard_after,
+                                uiState.clipboardTimeoutSeconds,
+                            ),
+                            value = uiState.clipboardTimeoutSeconds,
+                            range = 5f..120f,
+                            onChange = viewModel::setClipboardTimeout,
+                        )
                     }
-                    runCatching { context.startActivity(intent) }
-                },
-            )
+
+                    SettingsPage.Autofill -> {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.settings_autofill)) },
+                            supportingContent = {
+                                Text(
+                                    stringResource(
+                                        if (isAutofillActive) {
+                                            R.string.settings_autofill_active
+                                        } else {
+                                            R.string.settings_autofill_inactive
+                                        },
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.clickable {
+                                val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                runCatching { context.startActivity(intent) }
+                            },
+                        )
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.settings_passkeys)) },
+                            supportingContent = { Text(stringResource(R.string.settings_passkeys_desc)) },
+                            modifier = Modifier.clickable {
+                                val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    Settings.ACTION_CREDENTIAL_PROVIDER
+                                } else {
+                                    Settings.ACTION_SYNC_SETTINGS
+                                }
+                                val intent = Intent(action).apply {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                }
+                                runCatching { context.startActivity(intent) }
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 

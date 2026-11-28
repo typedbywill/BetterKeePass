@@ -48,7 +48,12 @@ class EntryEditorViewModel @Inject constructor(
 
     private val entryUuid: String? = savedStateHandle["uuid"]
 
-    private val _uiState = MutableStateFlow(EntryEditorUiState(isEditing = entryUuid != null))
+    private val _uiState = MutableStateFlow(
+        EntryEditorUiState(
+            isEditing = entryUuid != null,
+            groupPath = savedStateHandle.get<String>("group").orEmpty(),
+        ),
+    )
     val uiState: StateFlow<EntryEditorUiState> = _uiState.asStateFlow()
 
     init {
