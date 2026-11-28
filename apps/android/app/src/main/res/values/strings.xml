@@ -85,4 +85,26 @@
     <string name="passkey_create_title">Criar passkey</string>
     <string name="passkey_get_title">Usar passkey</string>
     <string name="cancel">Cancelar</string>
+
+    <string name="unlock_overline">SEUS DADOS, NO SEU DISPOSITIVO</string>
+    <string name="unlock_welcome_title">Seu espaço seguro, do seu jeito.</string>
+    <string name="unlock_welcome_desc">Abra seu cofre para acessar suas senhas e passkeys, ou crie um novo para começar.</string>
+    <string name="unlock_your_vaults">SEUS COFRES</string>
+    <string name="unlock_no_recent_title">Nenhum cofre ainda</string>
+    <string name="unlock_no_recent_desc">Seus cofres abertos recentemente aparecerão aqui.</string>
+    <string name="unlock_selected_vault">Cofre selecionado</string>
+    <string name="unlock_or_password">ou use a senha mestra</string>
+    <string name="unlock_keyfile_remove">Remover arquivo-chave</string>
+    <string name="unlock_tip">Seu cofre permanece neste dispositivo e nunca é enviado automaticamente.</string>
+    <string name="strength_weak">Fraca</string>
+    <string name="strength_fair">Razoável</string>
+    <string name="strength_good">Boa</string>
+    <string name="strength_strong">Forte</string>
+    <string name="settings_appearance">APARÊNCIA</string>
+    <string name="settings_theme_system">Sistema</string>
+    <string name="settings_theme_light">Claro</string>
+    <string name="settings_theme_dark">Escuro</string>
+    <string name="settings_theme_preset">Tema</string>
+    <string name="settings_dynamic_color">Cores do sistema</string>
+    <string name="settings_dynamic_color_desc">Usa as cores do papel de parede (Material You)</string>
 </resources>

@@ -11,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import app.betterkeepass.data.SettingsDataStore
 import app.betterkeepass.data.VaultRepository
 import app.betterkeepass.data.VaultSessionState
 import app.betterkeepass.ui.detail.EntryDetailScreen
@@ -28,12 +29,15 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var vaultRepository: VaultRepository
 
+    @Inject
+    lateinit var settings: SettingsDataStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
-            BkpTheme {
+            BkpTheme(settings) {
                 val session by vaultRepository.session.collectAsStateWithLifecycle()
                 val navController = rememberNavController()
 

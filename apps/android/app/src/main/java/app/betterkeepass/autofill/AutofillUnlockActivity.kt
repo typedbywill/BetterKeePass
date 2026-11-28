@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.betterkeepass.data.SettingsDataStore
 import app.betterkeepass.data.VaultRepository
 import app.betterkeepass.data.VaultSessionState
 import app.betterkeepass.ui.theme.BkpTheme
@@ -28,6 +29,9 @@ class AutofillUnlockActivity : FragmentActivity() {
     @Inject
     lateinit var vaultRepository: VaultRepository
 
+    @Inject
+    lateinit var settings: SettingsDataStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -37,7 +41,7 @@ class AutofillUnlockActivity : FragmentActivity() {
         val passwordId = parcelableExtra<AutofillId>(EXTRA_PASSWORD_ID)
 
         setContent {
-            BkpTheme {
+            BkpTheme(settings) {
                 val session by vaultRepository.session.collectAsStateWithLifecycle()
 
                 LaunchedEffect(session) {

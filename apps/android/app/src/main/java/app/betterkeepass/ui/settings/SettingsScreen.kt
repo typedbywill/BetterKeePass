@@ -55,6 +55,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
+    val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val autofillManager = remember { context.getSystemService(AutofillManager::class.java) }
     val isAutofillActive = autofillManager?.hasEnabledAutofillServices() == true
@@ -80,6 +81,14 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
+            AppearanceSection(
+                appearance = appearance,
+                onModeChange = viewModel::setThemeMode,
+                onPresetChange = viewModel::setThemePreset,
+                onDynamicColorChange = viewModel::setDynamicColor,
+            )
+            HorizontalDivider()
+
             if (uiState.currentVaultUri != null) {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.settings_biometric)) },

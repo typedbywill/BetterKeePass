@@ -6,6 +6,9 @@ import app.betterkeepass.data.SettingsDataStore
 import app.betterkeepass.data.VaultRepository
 import app.betterkeepass.data.VaultSessionState
 import app.betterkeepass.security.BiometricCryptoManager
+import app.betterkeepass.ui.theme.Appearance
+import app.betterkeepass.ui.theme.ThemeMode
+import app.betterkeepass.ui.theme.ThemePreset
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +46,21 @@ class SettingsViewModel @Inject constructor(
             currentVaultUri = uri,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
+
+    val appearance: StateFlow<Appearance> = settings.appearance
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Appearance())
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { settings.setThemeMode(mode) }
+    }
+
+    fun setThemePreset(preset: ThemePreset) {
+        viewModelScope.launch { settings.setThemePreset(preset) }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { settings.setDynamicColor(enabled) }
+    }
 
     fun setLockTimeout(minutes: Int) {
         viewModelScope.launch { settings.setLockTimeoutMinutes(minutes) }

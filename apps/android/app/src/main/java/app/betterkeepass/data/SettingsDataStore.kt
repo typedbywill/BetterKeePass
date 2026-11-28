@@ -3,12 +3,17 @@ package app.betterkeepass.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.betterkeepass.ui.theme.Appearance
+import app.betterkeepass.ui.theme.ThemeMode
+import app.betterkeepass.ui.theme.ThemePreset
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -38,6 +43,9 @@ class SettingsDataStore @Inject constructor(
         val LOCK_TIMEOUT_MINUTES = intPreferencesKey("lock_timeout_minutes")
         val CLIPBOARD_TIMEOUT_SECONDS = intPreferencesKey("clipboard_timeout_seconds")
         val BIOMETRIC_SECRETS = stringPreferencesKey("biometric_secrets_json")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val THEME_PRESET = stringPreferencesKey("theme_preset")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     }
 
     val recentVaults: Flow<List<RecentVault>> = context.dataStore.data.map { prefs ->
@@ -54,6 +62,30 @@ class SettingsDataStore @Inject constructor(
 
     val biometricEnabledUris: Flow<Set<String>> = context.dataStore.data.map { prefs ->
         parseBiometricMap(prefs[Keys.BIOMETRIC_SECRETS]).keys
+    }
+
+    val appearance: Flow<Appearance> = context.dataStore.data.map { prefs ->
+        Appearance(
+            mode = ThemeMode.entries.firstOrNull { it.name == prefs[Keys.THEME_MODE] } ?: ThemeMode.System,
+            preset = ThemePreset.fromId(prefs[Keys.THEME_PRESET]),
+            dynamicColor = prefs[Keys.DYNAMIC_COLOR] ?: false,
+        )
+    }.distinctUntilChanged()
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode.name }
+    }
+
+    /** Picking a preset also turns system colors off, otherwise the choice would be invisible. */
+    suspend fun setThemePreset(preset: ThemePreset) {
+        context.dataStore.edit {
+            it[Keys.THEME_PRESET] = preset.id
+            it[Keys.DYNAMIC_COLOR] = false
+        }
+    }
+
+    suspend fun setDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun addRecentVault(uri: String, displayName: String) {

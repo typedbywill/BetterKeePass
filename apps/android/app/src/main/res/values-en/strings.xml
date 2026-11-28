@@ -85,4 +85,26 @@
     <string name="passkey_create_title">Create passkey</string>
     <string name="passkey_get_title">Use passkey</string>
     <string name="cancel">Cancel</string>
+
+    <string name="unlock_overline">YOUR DATA, ON YOUR DEVICE</string>
+    <string name="unlock_welcome_title">Your secure space, your way.</string>
+    <string name="unlock_welcome_desc">Open your vault to access your passwords and passkeys, or create a new one to get started.</string>
+    <string name="unlock_your_vaults">YOUR VAULTS</string>
+    <string name="unlock_no_recent_title">No vaults yet</string>
+    <string name="unlock_no_recent_desc">Your recently opened vaults will appear here.</string>
+    <string name="unlock_selected_vault">Selected vault</string>
+    <string name="unlock_or_password">or use the master password</string>
+    <string name="unlock_keyfile_remove">Remove keyfile</string>
+    <string name="unlock_tip">Your vault stays on this device and is never uploaded automatically.</string>
+    <string name="strength_weak">Weak</string>
+    <string name="strength_fair">Fair</string>
+    <string name="strength_good">Good</string>
+    <string name="strength_strong">Strong</string>
+    <string name="settings_appearance">APPEARANCE</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_preset">Theme</string>
+    <string name="settings_dynamic_color">System colors</string>
+    <string name="settings_dynamic_color_desc">Use wallpaper colors (Material You)</string>
 </resources>

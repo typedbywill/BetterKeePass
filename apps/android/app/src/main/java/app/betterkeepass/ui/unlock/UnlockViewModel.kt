@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,6 +45,24 @@ class UnlockViewModel @Inject constructor(
 
     val recentVaults: StateFlow<List<RecentVault>> = settings.recentVaults
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        // Preselect the last vault so unlocking takes a single step.
+        viewModelScope.launch {
+            val last = settings.recentVaults.first().firstOrNull() ?: return@launch
+            if (_uiState.value.selectedUri == null) {
+                selectVault(Uri.parse(last.uri), last.displayName)
+            }
+        }
+        // Biometrics can be toggled in settings while this ViewModel stays alive.
+        viewModelScope.launch {
+            settings.biometricEnabledUris.collect { uris ->
+                _uiState.update {
+                    it.copy(biometricAvailableForSelected = it.selectedUri?.toString() in uris)
+                }
+            }
+        }
+    }
 
     fun selectVault(uri: Uri, displayName: String) {
         viewModelScope.launch {

@@ -30,6 +30,7 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.betterkeepass.R
+import app.betterkeepass.data.SettingsDataStore
 import app.betterkeepass.data.VaultRepository
 import app.betterkeepass.data.VaultSessionState
 import app.betterkeepass.ui.theme.BkpTheme
@@ -51,13 +52,16 @@ class PasskeyActivity : FragmentActivity() {
     @Inject
     lateinit var vaultRepository: VaultRepository
 
+    @Inject
+    lateinit var settings: SettingsDataStore
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
-            BkpTheme {
+            BkpTheme(settings) {
                 val session by vaultRepository.session.collectAsStateWithLifecycle()
 
                 LaunchedEffect(session) {
